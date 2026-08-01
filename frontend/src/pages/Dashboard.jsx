@@ -1,58 +1,51 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { Package, FileText, DollarSign, Wand2, Clock } from "lucide-react";
+import { Package, FileText, DollarSign, Wand2, Clock, AlertCircle } from "lucide-react";
 
 const StatCard = ({ label, value, icon: Icon, testid }) => (
-  <div
-    data-testid={testid}
-    className="bg-white border border-slate-200 rounded-md shadow-sm p-6"
-  >
+  <div data-testid={testid} className="bg-white border border-slate-200 rounded-md shadow-sm p-6">
     <div className="flex items-center justify-between">
-      <div className="text-xs text-slate-500 font-medium uppercase tracking-widest">
-        {label}
-      </div>
+      <div className="text-xs text-slate-500 font-medium uppercase tracking-widest">{label}</div>
       <Icon size={16} className="text-slate-400" strokeWidth={1.75} />
     </div>
-    <div className="mt-3 text-2xl font-semibold text-[#0A1128] tracking-tight">
-      {value}
-    </div>
+    <div className="mt-3 text-2xl font-semibold text-[#0A1128] tracking-tight">{value}</div>
   </div>
 );
 
 const formatDate = (iso) => {
   if (!iso) return "-";
-  try {
-    return new Date(iso).toLocaleString("tr-TR");
-  } catch {
-    return iso;
-  }
+  try { return new Date(iso).toLocaleString("tr-TR"); } catch { return iso; }
 };
 
-const kindLabel = {
-  import: "İçe Aktarma",
-  edit: "Düzenleme",
-  export: "Dışa Aktarma",
-  bulk: "Toplu İşlem",
-};
+const kindLabel = { import: "İçe Aktarma", edit: "Düzenleme", export: "Dışa Aktarma", bulk: "Toplu İşlem" };
 
 const Dashboard = () => {
   const [stats, setStats] = useState(null);
+  const [error, setError] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    api.get("/dashboard/stats").then((r) => setStats(r.data));
-  }, []);
+  const load = () => {
+    setLoading(true); setError(null);
+    api.get("/dashboard/stats").then((r) => setStats(r.data))
+      .catch((e) => setError(e?.response?.data?.detail || "Panel yüklenemedi"))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(); }, []);
 
-  if (!stats) return <div className="text-slate-500">Yükleniyor...</div>;
+  if (loading) return <div className="text-slate-500 text-sm">Yükleniyor...</div>;
+  if (error) return (
+    <div data-testid="dashboard-error" className="border border-red-200 bg-red-50 rounded-md p-6 text-sm text-red-700 flex items-center gap-2">
+      <AlertCircle size={16} /> {error}
+      <button onClick={load} className="ml-auto font-medium text-blue-700 hover:text-blue-800">Tekrar dene</button>
+    </div>
+  );
+  if (!stats) return null;
 
   return (
     <div className="space-y-6" data-testid="dashboard-page">
       <div>
-        <h1 className="text-2xl sm:text-3xl tracking-tight font-semibold text-[#0A1128]">
-          Genel Bakış
-        </h1>
-        <p className="text-sm text-slate-600 mt-1">
-          Katalog durumunuza dair özet bilgiler.
-        </p>
+        <h1 className="text-2xl sm:text-3xl tracking-tight font-semibold text-[#0A1128]">Genel Bakış</h1>
+        <p className="text-sm text-slate-600 mt-1">Katalog durumunuza dair özet bilgiler.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
@@ -64,19 +57,14 @@ const Dashboard = () => {
 
       <div className="bg-white border border-slate-200 rounded-md shadow-sm p-6">
         <div className="flex items-center gap-2 text-xs text-slate-500 uppercase tracking-widest">
-          <Clock size={14} />
-          Son İçe Aktarma
+          <Clock size={14} /> Son İçe Aktarma
         </div>
-        <div className="mt-2 text-base font-medium text-[#0A1128]">
-          {formatDate(stats.last_import_at)}
-        </div>
+        <div className="mt-2 text-base font-medium text-[#0A1128]">{formatDate(stats.last_import_at)}</div>
       </div>
 
       <div className="bg-white border border-slate-200 rounded-md shadow-sm">
         <div className="px-6 py-4 border-b border-slate-200">
-          <h2 className="text-lg font-semibold tracking-tight text-[#0A1128]">
-            Son Aktiviteler
-          </h2>
+          <h2 className="text-lg font-semibold tracking-tight text-[#0A1128]">Son Aktiviteler</h2>
         </div>
         <ul data-testid="recent-activities" className="divide-y divide-slate-100">
           {stats.recent_activities.length === 0 && (

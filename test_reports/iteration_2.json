@@ -1,0 +1,27 @@
+{
+  "summary": "Phase 1 hardening verified end-to-end. Full pytest suite (30 existing + 22 new integration/AI-failure tests) = 52 passed. Added /app/backend/tests/test_live_integration.py (hits public REACT_APP_BACKEND_URL) covering non-destructive import, replace mode, row errors, SKU normalization & uniqueness (409), CSV rejection (.xlsx/empty), all 4 encodings (utf-8-sig/utf-8/cp1254/iso-8859-9) with Turkish char preservation, number parsing (all 4 formats -> 1234.56), Turkish auto-mapping incl. Görsel URL != product_url, mapping_confidence field, pagination bounds (page=0, page_size=500 -> 4xx), bulk ids[]==empty (422), BULK_PRICE_PERCENT_LIMIT (percent=500 -> 422), bulk price never negative, UTC 'Z' timestamps on recent_activities & last_import_at (after new import), UTF-8 BOM on all three /api/export/* endpoints, PATCH URL validation. Added /app/backend/tests/test_ai_failure.py - monkeypatches _gemini_call to raise AIProviderError and asserts /api/products/{id}/improve returns HTTP 502 with Turkish 'AI sağlayıcı hatası' message. Alembic verified idempotent (upgrade head on empty DB -> apply 0001_initial; re-run -> no-op). Frontend live-tested: Import page auto-maps Turkish headers with 'Yüksek' confidence badges, both mode radios ('Sadece boş alanları güncelle' / 'Eşlenen alanları değiştir') render, commit produces result panel with Yeni/Güncellenen/Atlanan/Hata counters and Turkish success toast. Sidebar nav to all 6 pages works, KPI cards render, no console errors.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_live_integration.py",
+    "/app/backend/tests/test_ai_failure.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 845 lines - consider splitting import/AI/export routers into modules for maintainability, but not blocking for Phase 1.",
+    "import_commit executes 'db.rollback() if False else None' (dead code line 679) - minor cleanup.",
+    "Existing DB rows from before the UTC-Z fix may still have '+00:00' in last_import_at; new imports overwrite correctly. Consider one-time migration to normalize old Meta value."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_live_integration.py (new)",
+    "/app/backend/tests/test_ai_failure.py (new)"
+  ],
+  "success_rate": {"backend": "100% (52/52 pytest)", "frontend": "100% (all critical flows pass)"},
+  "test_credentials": "none required (no auth)",
+  "seed_data_creation": "TEST_-prefixed products created by live integration tests remain in preview DB (non-destructive to existing seed).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Live integration tests point at REACT_APP_BACKEND_URL. Pytest command: cd /app/backend && python -m pytest tests/ -v --junitxml=/app/test_reports/pytest/pytest_results.xml. If preview DB is reset, TEST_ products will be recreated by the tests idempotently. Old last_import_at Meta value in preview DB may lack 'Z' until a new import runs - test triggers one so assertion holds.",
+  "rca of the issue": "n/a - no bugs found"
+}

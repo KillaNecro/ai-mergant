@@ -1,10 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { toast } from "sonner";
-import { Sparkles, Tags, TrendingUp, TrendingDown, Download } from "lucide-react";
+import { Sparkles, Tags, TrendingUp, TrendingDown, Download, AlertCircle } from "lucide-react";
+
+const CONFIRM_THRESHOLD = 20;
 
 const BulkOps = () => {
   const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [selected, setSelected] = useState(new Set());
   const [categories, setCategories] = useState([]);
   const [newCategory, setNewCategory] = useState("");
@@ -12,9 +16,15 @@ const BulkOps = () => {
   const [busy, setBusy] = useState(false);
   const [q, setQ] = useState("");
 
-  const load = () => api.get("/products", { params: { page_size: 200, q: q || undefined } }).then((r) => setProducts(r.data.items));
+  const load = () => {
+    setLoading(true); setError(null);
+    api.get("/products", { params: { page_size: 200, q: q || undefined } })
+      .then((r) => setProducts(r.data.items))
+      .catch((e) => setError(e?.response?.data?.detail || "Ürünler yüklenemedi"))
+      .finally(() => setLoading(false));
+  };
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [q]);
-  useEffect(() => { api.get("/products/categories").then((r) => setCategories(r.data)); }, []);
+  useEffect(() => { api.get("/products/categories").then((r) => setCategories(r.data)).catch(() => {}); }, []);
 
   const toggle = (id) => {
     const s = new Set(selected);
@@ -32,8 +42,14 @@ const BulkOps = () => {
     return true;
   };
 
-  const run = async (fn, successMsg) => {
-    if (!requireSelected()) return;
+  const confirmLarge = (label) => {
+    if (selected.size < CONFIRM_THRESHOLD) return true;
+    return window.confirm(`${selected.size} ürüne "${label}" uygulanacak. Devam etmek istiyor musunuz?`);
+  };
+
+  const run = async (label, fn, successMsg) => {
+    if (!requireSelected() || busy) return;
+    if (!confirmLarge(label)) return;
     setBusy(true);
     try {
       await fn();
@@ -45,21 +61,25 @@ const BulkOps = () => {
   };
 
   const ids = () => [...selected];
-
-  const improveTitles = () => run(() => api.post("/bulk/improve-products", { ids: ids(), kind: "title" }), "Başlıklar iyileştirildi");
-  const improveDescs = () => run(() => api.post("/bulk/improve-products", { ids: ids(), kind: "description" }), "Açıklamalar iyileştirildi");
+  const improveTitles = () => run("Başlık İyileştir", () => api.post("/bulk/improve-products", { ids: ids(), kind: "title" }), "Başlıklar iyileştirildi");
+  const improveDescs = () => run("Açıklama İyileştir", () => api.post("/bulk/improve-products", { ids: ids(), kind: "description" }), "Açıklamalar iyileştirildi");
   const setCat = () => {
     if (!newCategory.trim()) return toast.error("Kategori girin");
-    run(() => api.post("/bulk/category", { ids: ids(), category: newCategory.trim() }), "Kategori güncellendi");
+    run(`Kategori: ${newCategory.trim()}`, () => api.post("/bulk/category", { ids: ids(), category: newCategory.trim() }), "Kategori güncellendi");
   };
-  const priceUp = () => run(() => api.post("/bulk/price-percent", { ids: ids(), percent: Math.abs(Number(pct)) }), "Fiyat arttırıldı");
-  const priceDown = () => run(() => api.post("/bulk/price-percent", { ids: ids(), percent: -Math.abs(Number(pct)) }), "Fiyat düşürüldü");
+  const priceUp = () => run(`Fiyat +%${Math.abs(pct)}`, () => api.post("/bulk/price-percent", { ids: ids(), percent: Math.abs(Number(pct)) }), "Fiyat arttırıldı");
+  const priceDown = () => run(`Fiyat -%${Math.abs(pct)}`, () => api.post("/bulk/price-percent", { ids: ids(), percent: -Math.abs(Number(pct)) }), "Fiyat düşürüldü");
 
   const exportSel = async () => {
-    if (!requireSelected()) return;
-    const res = await api.post("/export/selected", { ids: ids() }, { responseType: "blob" });
-    downloadBlob(res.data, "secili-urunler.csv");
-    toast.success("Dışa aktarıldı");
+    if (!requireSelected() || busy) return;
+    setBusy(true);
+    try {
+      const res = await api.post("/export/selected", { ids: ids() }, { responseType: "blob" });
+      downloadBlob(res.data, "secili-urunler.csv");
+      toast.success("Dışa aktarıldı");
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Dışa aktarma başarısız");
+    } finally { setBusy(false); }
   };
 
   return (
@@ -80,12 +100,14 @@ const BulkOps = () => {
             className="w-full h-9 rounded-md border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500" />
           <datalist id="cats">{categories.map((c) => <option key={c} value={c} />)}</datalist>
           <button data-testid="bulk-category-apply" disabled={busy} onClick={setCat}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm font-medium disabled:opacity-60">Uygula</button>
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-md px-3 py-2 text-sm font-medium disabled:opacity-60">
+            {busy ? "Uygulanıyor..." : "Uygula"}
+          </button>
         </div>
         <div className="bg-white border border-slate-200 rounded-md shadow-sm p-5 space-y-3">
           <div className="flex items-center gap-2 text-sm font-medium text-[#0A1128]"><TrendingUp size={16} /> Fiyat Yüzdesi</div>
           <div className="flex items-center gap-2">
-            <input type="number" value={pct} onChange={(e) => setPct(e.target.value)} data-testid="bulk-pct-input"
+            <input type="number" min="-90" max="90" value={pct} onChange={(e) => setPct(e.target.value)} data-testid="bulk-pct-input"
               className="flex-1 h-9 rounded-md border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500" />
             <span className="text-sm text-slate-500">%</span>
           </div>
@@ -109,40 +131,51 @@ const BulkOps = () => {
             className="h-8 rounded-md border border-slate-200 px-3 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-blue-500"
             data-testid="bulk-search" />
         </div>
+        {error && (
+          <div className="p-6 text-sm text-red-700 bg-red-50 border-b border-red-100 flex items-center gap-2">
+            <AlertCircle size={16} /> {error}
+          </div>
+        )}
         <div className="max-h-[520px] overflow-y-auto">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-slate-50 text-slate-600 border-b border-slate-200">
-              <tr>
-                <th className="px-4 py-2 w-10 text-left">
-                  <input type="checkbox" data-testid="bulk-select-all"
-                    checked={products.length > 0 && products.every((p) => selected.has(p.id))}
-                    onChange={toggleAll}
-                    className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                </th>
-                <th className="px-4 py-2 text-left font-medium">SKU</th>
-                <th className="px-4 py-2 text-left font-medium">Ürün Adı</th>
-                <th className="px-4 py-2 text-left font-medium">Kategori</th>
-                <th className="px-4 py-2 text-left font-medium">Fiyat</th>
-                <th className="px-4 py-2 text-left font-medium">Stok</th>
-              </tr>
-            </thead>
-            <tbody>
-              {products.map((p) => (
-                <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50/60">
-                  <td className="px-4 py-2">
-                    <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)}
-                      data-testid={`bulk-row-${p.sku}`}
+          {loading ? (
+            <div className="p-8 text-sm text-slate-500 text-center">Yükleniyor...</div>
+          ) : products.length === 0 ? (
+            <div className="p-8 text-sm text-slate-500 text-center">Ürün bulunamadı.</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-slate-50 text-slate-600 border-b border-slate-200">
+                <tr>
+                  <th className="px-4 py-2 w-10 text-left">
+                    <input type="checkbox" data-testid="bulk-select-all"
+                      checked={products.length > 0 && products.every((p) => selected.has(p.id))}
+                      onChange={toggleAll}
                       className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
-                  </td>
-                  <td className="px-4 py-2 font-mono text-xs text-slate-500">{p.sku}</td>
-                  <td className="px-4 py-2 text-[#0A1128]">{p.improved_name || p.name}</td>
-                  <td className="px-4 py-2 text-slate-700">{p.category || "-"}</td>
-                  <td className="px-4 py-2 text-slate-700">{p.price != null ? `₺${Number(p.price).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}` : "-"}</td>
-                  <td className="px-4 py-2 text-slate-700">{p.stock ?? 0}</td>
+                  </th>
+                  <th className="px-4 py-2 text-left font-medium">SKU</th>
+                  <th className="px-4 py-2 text-left font-medium">Ürün Adı</th>
+                  <th className="px-4 py-2 text-left font-medium">Kategori</th>
+                  <th className="px-4 py-2 text-left font-medium">Fiyat</th>
+                  <th className="px-4 py-2 text-left font-medium">Stok</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {products.map((p) => (
+                  <tr key={p.id} className="border-b border-slate-100 hover:bg-slate-50/60">
+                    <td className="px-4 py-2">
+                      <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)}
+                        data-testid={`bulk-row-${p.sku}`}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs text-slate-500">{p.sku}</td>
+                    <td className="px-4 py-2 text-[#0A1128]">{p.improved_name || p.name}</td>
+                    <td className="px-4 py-2 text-slate-700">{p.category || "-"}</td>
+                    <td className="px-4 py-2 text-slate-700">{p.price != null ? `₺${Number(p.price).toLocaleString("tr-TR", { minimumFractionDigits: 2 })}` : "-"}</td>
+                    <td className="px-4 py-2 text-slate-700">{p.stock ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>
@@ -154,7 +187,7 @@ const ActionCard = ({ title, icon: Icon, onClick, testid, disabled }) => (
     data-testid={testid}
     onClick={onClick}
     disabled={disabled}
-    className="bg-white border border-slate-200 rounded-md shadow-sm p-5 text-left hover:border-blue-300 hover:bg-blue-50/30 transition-colors disabled:opacity-60"
+    className="bg-white border border-slate-200 rounded-md shadow-sm p-5 text-left hover:border-blue-300 hover:bg-blue-50/30 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
   >
     <Icon size={18} className="text-blue-600" strokeWidth={1.75} />
     <div className="mt-3 text-sm font-medium text-[#0A1128]">{title}</div>

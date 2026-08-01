@@ -86,3 +86,11 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Local SQLite databases
+*.db
+*.sqlite
+*.sqlite3
+backend/merchant_os.db
+backend/.env
+frontend/.env
