@@ -1,0 +1,97 @@
+{
+  "theme": "light",
+  "design_context": "B2B SaaS Admin Dashboard (Linear / Vercel Aesthetic)",
+  "typography": {
+    "heading_font": "Manrope",
+    "body_font": "IBM Plex Sans",
+    "scale": {
+      "h1": "text-2xl sm:text-3xl tracking-tight font-semibold text-[#0A1128]",
+      "h2": "text-lg sm:text-xl tracking-tight font-semibold text-[#0A1128]",
+      "h3": "text-base font-medium text-[#0A1128]",
+      "body": "text-sm text-slate-600 leading-relaxed",
+      "small": "text-xs text-slate-500 font-medium uppercase tracking-widest"
+    }
+  },
+  "colors": {
+    "primary_accent": "#2563EB",
+    "primary_accent_hover": "#1D4ED8",
+    "background_main": "#FFFFFF",
+    "background_sidebar": "#F9FAFB",
+    "background_card": "#FFFFFF",
+    "text_primary": "#0A1128",
+    "text_secondary": "#475569",
+    "text_tertiary": "#94a3b8",
+    "border": "#e2e8f0"
+  },
+  "visual_enhancers": {
+    "shadows": "Minimal. Use shadow-sm for cards. Rely on 1px borders for structure and depth.",
+    "borders": "border-slate-200 universally for layout separation.",
+    "radius": "rounded-md (6px) for standard UI elements like buttons, inputs, and cards.",
+    "gradients": "FORBIDDEN.",
+    "glassmorphism": "FORBIDDEN."
+  },
+  "components": {
+    "cards": "bg-white border border-slate-200 rounded-md shadow-sm p-6",
+    "sidebar": "w-64 bg-[#F9FAFB] border-r border-slate-200 flex flex-col h-full flex-shrink-0",
+    "sidebar_item": "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-slate-600 hover:text-[#0A1128] hover:bg-slate-100 transition-colors",
+    "sidebar_item_active": "flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-blue-700 bg-blue-50 transition-colors",
+    "table": "w-full text-sm text-left border-collapse",
+    "table_header": "bg-slate-50 text-slate-600 font-medium border-y border-slate-200 px-4 py-3",
+    "table_row": "border-b border-slate-100 hover:bg-slate-50/50 transition-colors text-slate-700 px-4 py-3",
+    "button_primary": "bg-blue-600 hover:bg-blue-700 text-white rounded-md px-4 py-2 text-sm font-medium transition-colors focus:ring-2 focus:ring-blue-500 focus:ring-offset-1",
+    "button_secondary": "bg-white border border-slate-200 hover:bg-slate-50 text-[#0A1128] rounded-md px-4 py-2 text-sm font-medium transition-colors",
+    "badge_demo": "inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700 tracking-wide uppercase",
+    "input": "flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-500",
+    "toast": "Use sonner for notifications."
+  },
+  "grids": {
+    "dashboard_stats": "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6",
+    "editor_split": "grid grid-cols-1 lg:grid-cols-2 gap-6"
+  },
+  "layouts": {
+    "main_structure": "flex h-screen w-full overflow-hidden bg-white text-[#0A1128]",
+    "content_area": "flex-1 flex flex-col h-screen overflow-y-auto bg-white",
+    "header": "sticky top-0 z-10 flex h-14 items-center justify-between border-b border-slate-200 bg-white px-6",
+    "page_container": "p-6 md:p-8 max-w-7xl mx-auto w-full flex-1 space-y-6"
+  },
+  "motion": {
+    "hover_states": "transition-colors duration-200 ease-in-out",
+    "focus_states": "transition-shadow duration-200",
+    "general": "No bouncy animations. Keep transitions strictly functional and professional."
+  },
+  "accessibility": {
+    "contrast": "Text must meet 4.5:1 ratio minimum.",
+    "focus_rings": "focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1",
+    "screen_readers": "Ensure all icon buttons have aria-labels."
+  },
+  "media": {
+    "images": "None required for this MVP.",
+    "icons": "lucide-react. Keep sizing at 16px-18px for sidebar and buttons. 1.5 stroke width.",
+    "emojis": "FORBIDDEN."
+  },
+  "3d_libraries": {
+    "required": false,
+    "libraries": []
+  },
+  "image_urls": {},
+  "instructions_to_main_agent": [
+    "Build the dashboard using React and Tailwind CSS in .js files.",
+    "Ensure all UI copy is in Turkish: 'Genel Bakış', 'Ürünler', 'İçe Aktar', 'Toplu İşlemler', 'Dışa Aktar', 'Ayarlar'.",
+    "Display a 'Demo Modu' badge in the header if no API key is provided.",
+    "Implement the Dashboard (stats and activity), Product Import (CSV/XML upload with column mapping), Product Catalog (searchable/filterable table), Product Editor (side-by-side original/improved), Bulk Editing, and Export features.",
+    "Sidebar should be fixed on the left and desktop-first responsive.",
+    "Use Shadcn UI logic where applicable, but override styling to match this strict B2B SaaS aesthetic."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Do not converge toward generic AI outputs or templated designs.",
+    "Never use dark colors as gradients.",
+    "Create depth through 1px borders and very subtle shadows, not heavy drop shadows.",
+    "Do not apply universal transitions (e.g., transition: all). Add transitions to specific interactive elements.",
+    "Do not center align the app container. Keep it strict left-aligned for data density.",
+    "Use pill-shaped or rounded-md buttons with clear focus states.",
+    "NEVER use AI assistant emoji characters like 🤖🧠💭💡🔮🎯 for icons.",
+    "Use sonner for toasts.",
+    "All interactive and key informational elements MUST include a `data-testid` attribute (e.g., data-testid='import-submit-button').",
+    "DO NOT use complete transparent backgrounds in headers, overlays, dropdowns, or any surface with content underneath."
+  ]
+}
