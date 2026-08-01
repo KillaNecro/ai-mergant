@@ -35,6 +35,10 @@ def tmp_db(monkeypatch):
     import models  # noqa: F401
     import server as server_mod
 
+    # Invariant: production goes through Alembic. Tests MUST opt out.
+    assert os.environ.get("DISABLE_MIGRATIONS") == "1", \
+        "Tests must set DISABLE_MIGRATIONS=1 and create schema via Base.metadata.create_all"
+
     # Create schema on the temporary database. Production uses Alembic.
     database.Base.metadata.create_all(bind=database.engine)
 
