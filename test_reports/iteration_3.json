@@ -1,0 +1,25 @@
+{
+  "summary": "Phase 1 CLEANUP verified end-to-end. All 10 review-request items pass. (1) Alembic is the sole migration mechanism: server.py contains _run_migrations() calling command.upgrade(cfg, 'head'); no create_all in server.py or database.py at module level. Backend supervisor logs show 'INFO [alembic.runtime.migration]' on every startup. Ran a fresh-DB smoke test (temp SQLITE_PATH, deleted before start) — startup emitted 'Running upgrade  -> 0001_initial, initial schema with unique SKU' and /api/health returned 200 {'status':'ok','demo_mode':true}. (2) DISABLE_MIGRATIONS=1 short-circuit confirmed via conftest.py fixture — pytest suite runs without invoking alembic. (3) Import accounting: no-op reimport in replace mode → skipped=1,updated=0; single-field change → updated=1,skipped=0 (test_accounting.py::test_no_change_counts_as_skipped, test_single_field_change_counts_as_updated). (4) Savepoint isolation: 5-row batch with rows 2 & 4 invalid → inserted=3, failed=2, errors=[row 2, row 4], and OK-A/OK-B/OK-D persisted while OK-C absent (test_failed_row_does_not_undo_prior_success). (5) fill_empty preserves stock=5 vs incoming 99 → skipped=1, stock stays 5. (6) replace overwrites stock 5→99 → updated=1. (7) `git ls-files backend/merchant_os.db` returns empty; `git check-ignore -v backend/merchant_os.db` → '.gitignore:94:backend/merchant_os.db'; physical file still exists (77KB). (8) requirements.txt contains exactly the 11 allowed packages (fastapi, uvicorn, python-dotenv, python-multipart, pydantic, sqlalchemy, alembic, defusedxml, google-genai, pytest, httpx) and none of the forbidden ones (motor/pymongo/bcrypt/jwt/boto3/oauthlib/cryptography/passlib/jose/emergentintegrations/stripe/openai/pandas/numpy). (9) Full pytest suite: 57 collected, 57 passed in 4.74s. (10) Frontend production build: CI=true DISABLE_ESLINT_PLUGIN=true yarn build succeeded (main.js 121.07 kB gz, main.css 10.4 kB gz). Live UI regression on preview URL: Genel Bakış KPIs (29/21/11/6) render, Ürünler list loads with pagination, İçe Aktar dropzone visible, DEMO MODU badge shown, Turkish labels intact, no console errors.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_accounting.py",
+    "/app/backend/tests/test_live_integration.py",
+    "/app/backend/tests/test_ai_failure.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is still 845 lines — split into routers/ (import, export, products, ai, dashboard) when Phase 2 lands; not blocking.",
+    "conftest.py uses Base.metadata.create_all against the tmp DB — this is explicitly whitelisted by policy comment; consider adding a lightweight assertion that DISABLE_MIGRATIONS is set so the invariant can't silently drift.",
+    "Alembic 0001_initial is the only revision — future schema changes must add new revisions; current setup is sound."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (57/57 pytest)", "frontend": "100% (build clean, all pages render)"},
+  "test_credentials": "none required (no auth in app)",
+  "seed_data_creation": "None new; TEST_-prefixed rows from prior iterations remain in preview DB.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Phase 1 CLEANUP fully verified. Alembic is authoritative in production; tests bypass via DISABLE_MIGRATIONS=1 + create_all on a tmp SQLite path. Full pytest: `cd /app/backend && python -m pytest tests/ -v --junitxml=/app/test_reports/pytest/pytest_results.xml`. Frontend build: `cd /app/frontend && CI=true DISABLE_ESLINT_PLUGIN=true yarn build`. Fresh-DB alembic sanity: unset SQLITE_PATH to a fresh tempfile, import server, TestClient(app) — logs must show 'Running upgrade -> 0001_initial'.",
+  "rca of the issue": "n/a - no bugs found"
+}

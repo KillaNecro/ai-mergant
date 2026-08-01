@@ -24,7 +24,7 @@ from starlette.middleware.cors import CORSMiddleware
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
-from database import Base, SessionLocal, engine, get_db  # noqa: E402
+from database import Base, SessionLocal, engine, get_db  # noqa: E402,F401
 from models import Activity, Meta, Product  # noqa: E402
 import ai_service  # noqa: E402
 from ai_service import AIProviderError  # noqa: E402
@@ -50,14 +50,31 @@ ALLOWED_MIMES = {
 
 
 # --- App bootstrap -------------------------------------------------------
-Base.metadata.create_all(bind=engine)
-
 app = FastAPI(title="AI Merchant OS Lite")
 api = APIRouter(prefix="/api")
 
 
+def _run_migrations() -> None:
+    """Bring the database schema up to head via Alembic.
+
+    Alembic is the sole schema migration mechanism in production.
+    Tests may bypass this via DISABLE_MIGRATIONS=1 and create tables directly
+    against a temporary database.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config(str(ROOT_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT_DIR / "alembic"))
+    sqlite_path = os.environ.get("SQLITE_PATH", str(ROOT_DIR / "merchant_os.db"))
+    cfg.set_main_option("sqlalchemy.url", f"sqlite:///{sqlite_path}")
+    command.upgrade(cfg, "head")
+
+
 @app.on_event("startup")
 def _startup() -> None:
+    if os.environ.get("DISABLE_MIGRATIONS", "").lower() not in ("1", "true", "yes"):
+        _run_migrations()
     if os.environ.get("DISABLE_SAMPLE_SEED", "").lower() in ("1", "true", "yes"):
         return
     db = SessionLocal()
@@ -612,76 +629,94 @@ def import_commit(payload: MappingIn, db: Session = Depends(get_db)):
     mode = payload.mode  # fill_empty | replace
     inserted = updated = skipped = failed = 0
     errors: list[dict] = []
+    _MAPPED_FIELDS = ("name", "description", "category", "price", "stock", "image_url", "product_url")
 
     def _get(row: dict, field: str) -> Any:
         col = mapping.get(field)
         return row.get(col) if col else None
 
+    def _field_is_empty(field: str, val: Any) -> bool:
+        if val is None:
+            return True
+        if isinstance(val, str) and val == "":
+            return True
+        if field == "stock" and val == 0:
+            return True
+        return False
+
     for idx, row in enumerate(payload.rows, start=1):
+        # Each row runs inside its own SAVEPOINT so a failure rolls back only
+        # this row's changes — previously successful inserts/updates persist
+        # and the counters remain accurate.
         try:
-            sku = _normalize_sku(_get(row, "sku"))
-            name_val = str(_get(row, "name") or "").strip()
-            if not sku:
-                raise ValueError("SKU boş")
-            if not name_val:
-                raise ValueError("Ürün adı boş")
+            with db.begin_nested():
+                sku = _normalize_sku(_get(row, "sku"))
+                name_val = str(_get(row, "name") or "").strip()
+                if not sku:
+                    raise ValueError("SKU boş")
+                if not name_val:
+                    raise ValueError("Ürün adı boş")
 
-            price_raw = _get(row, "price") if "price" in mapping else None
-            price = _to_float(price_raw) if price_raw not in (None, "") else None
-            if price is not None and price < 0:
-                raise ValueError("Fiyat negatif olamaz")
+                price_raw = _get(row, "price") if "price" in mapping else None
+                price = _to_float(price_raw) if price_raw not in (None, "") else None
+                if price is not None and price < 0:
+                    raise ValueError("Fiyat negatif olamaz")
 
-            stock_raw = _get(row, "stock") if "stock" in mapping else None
-            stock = _to_int(stock_raw) if stock_raw not in (None, "") else None
-            if stock is not None and stock < 0:
-                raise ValueError("Stok negatif olamaz")
+                stock_raw = _get(row, "stock") if "stock" in mapping else None
+                stock = _to_int(stock_raw) if stock_raw not in (None, "") else None
+                if stock is not None and stock < 0:
+                    raise ValueError("Stok negatif olamaz")
 
-            image_url = _validate_url(_get(row, "image_url")) if "image_url" in mapping else None
-            product_url = _validate_url(_get(row, "product_url")) if "product_url" in mapping else None
+                image_url = _validate_url(_get(row, "image_url")) if "image_url" in mapping else None
+                product_url = _validate_url(_get(row, "product_url")) if "product_url" in mapping else None
 
-            new_values = {
-                "sku": sku,
-                "name": name_val,
-                "description": (str(_get(row, "description") or "").strip() or None) if "description" in mapping else None,
-                "category": (str(_get(row, "category") or "").strip() or None) if "category" in mapping else None,
-                "price": price,
-                "stock": stock,
-                "image_url": image_url,
-                "product_url": product_url,
-            }
+                new_values = {
+                    "sku": sku,
+                    "name": name_val,
+                    "description": (str(_get(row, "description") or "").strip() or None) if "description" in mapping else None,
+                    "category": (str(_get(row, "category") or "").strip() or None) if "category" in mapping else None,
+                    "price": price,
+                    "stock": stock,
+                    "image_url": image_url,
+                    "product_url": product_url,
+                }
 
-            existing = db.query(Product).filter(Product.sku == sku).first()
-            if existing:
-                for field in ("name", "description", "category", "price", "stock", "image_url", "product_url"):
-                    if field not in mapping:
-                        continue  # unmapped -> preserve existing
-                    incoming = new_values[field]
-                    is_empty = incoming is None or (isinstance(incoming, str) and incoming == "")
-                    if mode == "fill_empty" and is_empty:
-                        continue  # do not overwrite with empty
-                    if mode == "fill_empty":
+                existing = db.query(Product).filter(Product.sku == sku).first()
+                if existing:
+                    changed = False
+                    for field in _MAPPED_FIELDS:
+                        if field not in mapping:
+                            continue  # unmapped -> preserve existing
+                        incoming = new_values[field]
                         current = getattr(existing, field)
-                        if current not in (None, "", 0) and field != "stock":
-                            # keep existing non-empty values
-                            continue
-                    setattr(existing, field, incoming)
-                updated += 1
-            else:
-                # new product may have Nones
-                if new_values["stock"] is None:
-                    new_values["stock"] = 0
-                db.add(Product(**new_values))
-                db.flush()  # make the SKU visible to subsequent queries in the same batch
-                inserted += 1
+                        if mode == "fill_empty":
+                            if _field_is_empty(field, incoming):
+                                continue  # nothing to fill with
+                            if not _field_is_empty(field, current):
+                                continue  # existing value wins
+                        # mode == replace, or fill_empty with empty current
+                        if current == incoming:
+                            continue  # no actual change
+                        setattr(existing, field, incoming)
+                        changed = True
+                    if changed:
+                        existing.is_edited = True
+                        updated += 1
+                    else:
+                        skipped += 1
+                else:
+                    if new_values["stock"] is None:
+                        new_values["stock"] = 0
+                    db.add(Product(**new_values))
+                    db.flush()  # surface SKU to subsequent queries in this batch
+                    inserted += 1
         except ValueError as exc:
             failed += 1
             errors.append({"row": idx, "message": str(exc)})
-            continue
         except IntegrityError as exc:
-            db.rollback()
+            # SAVEPOINT already rolled back — prior rows are untouched.
             failed += 1
             errors.append({"row": idx, "message": f"Veritabanı hatası: {exc.orig}"})
-            continue
 
     try:
         db.commit()

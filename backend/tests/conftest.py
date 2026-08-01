@@ -1,4 +1,11 @@
-"""Shared test fixtures. Every test uses a fresh, temporary SQLite DB."""
+"""Shared test fixtures. Every test uses a fresh, temporary SQLite DB.
+
+Tests create schema directly with Base.metadata.create_all against the
+temporary database — this is explicitly allowed by the Phase 1 policy
+("May only be used explicitly in isolated automated tests with temporary
+databases"). In production and normal application startup, Alembic is the
+sole schema migration mechanism.
+"""
 import os
 import sys
 import tempfile
@@ -12,24 +19,27 @@ sys.path.insert(0, str(BACKEND_DIR))
 
 @pytest.fixture()
 def tmp_db(monkeypatch):
-    """Point the app at a temporary SQLite file for the duration of the test."""
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
     monkeypatch.setenv("SQLITE_PATH", path)
-    monkeypatch.setenv("GEMINI_API_KEY", "")  # force demo mode by default
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     monkeypatch.setenv("DISABLE_SAMPLE_SEED", "1")
+    monkeypatch.setenv("DISABLE_MIGRATIONS", "1")
 
-    # Reload database + models + server so they pick up the new env var.
-    for mod in [
-        "server", "sample_data", "ai_service", "models", "database",
-    ]:
+    # Reload modules so they pick up the new SQLITE_PATH.
+    for mod in ["server", "sample_data", "ai_service", "models", "database"]:
         if mod in sys.modules:
             del sys.modules[mod]
 
     import database  # noqa: F401
     import models  # noqa: F401
-    import server as server_mod  # noqa: E402
+    import server as server_mod
+
+    # Create schema on the temporary database. Production uses Alembic.
+    database.Base.metadata.create_all(bind=database.engine)
+
     yield server_mod
+
     try:
         os.unlink(path)
     except OSError:
