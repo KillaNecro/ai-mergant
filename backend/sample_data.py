@@ -145,6 +145,7 @@ def seed(db):
     for s in SAMPLES:
         db.add(Product(**s))
     db.add(Activity(kind="import", message=f"Örnek veri yüklendi ({len(SAMPLES)} ürün)"))
-    db.merge(Meta(key="last_import_at", value=now.isoformat()))
+    iso = now.isoformat().replace("+00:00", "Z")
+    db.merge(Meta(key="last_import_at", value=iso))
     db.commit()
     return len(SAMPLES)

@@ -676,7 +676,6 @@ def import_commit(payload: MappingIn, db: Session = Depends(get_db)):
         except ValueError as exc:
             failed += 1
             errors.append({"row": idx, "message": str(exc)})
-            db.rollback() if False else None  # no rollback needed, per-row
             continue
         except IntegrityError as exc:
             db.rollback()
