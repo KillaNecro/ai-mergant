@@ -1,0 +1,32 @@
+{
+  "summary": "First-finish smoke test for AI Merchant OS Lite (Turkish B2B SaaS). All critical backend endpoints and core frontend flows work as expected. Demo mode active, Turkish characters preserved end-to-end, and Product Editor + Export + Bulk actions functional.",
+  "tested_scope": ["backend", "frontend", "integration"],
+  "passed": [
+    "GET /api/health -> {status:ok, demo_mode:true}",
+    "GET /api/dashboard/stats returns totals, missing_desc(6), missing_price(2), edited(0), last_import_at, recent_activities",
+    "GET /api/products with pagination works (total=13 seeded)",
+    "GET /api/products/{id} returns full product",
+    "PATCH /api/products/{id} updates improved_name with Turkish chars (200)",
+    "POST /api/products/{id}/revert (200)",
+    "POST /api/products/{id}/improve kind=both produces cleaned Turkish title + structured description (no fake specs, mentions category)",
+    "POST /api/import/preview (CSV UTF-8 BOM with ÇĞŞİÖÜ) returns columns/sample/rows correctly",
+    "POST /api/import/commit inserts new SKU (inserted:1)",
+    "POST /api/import/commit rejects missing sku/name mapping with HTTP 400 'SKU ve Ürün Adı eşleştirmesi zorunludur'",
+    "GET /api/import/sample returns UTF-8 BOM CSV template with Turkish sample rows",
+    "POST /api/bulk/improve-products kind=title updated:2",
+    "POST /api/bulk/category updated:2 (200)",
+    "POST /api/bulk/price-percent +10 updated:2 and reflected in export (99.90 -> 109.89)",
+    "GET /api/export/all, POST /api/export/selected, GET /api/export/filtered all return UTF-8 BOM CSV with Turkish chars preserved",
+    "Frontend loads at REACT_APP_BACKEND_URL, no console errors",
+    "Sidebar nav: Genel Bakış, Ürünler, İçe Aktar, Toplu İşlemler, Dışa Aktar, Ayarlar all navigate",
+    "Dashboard KPI cards (Toplam Ürün=14, Eksik Açıklama=6, Eksik Fiyat=2, Düzenlenen Ürün=2) + Son İçe Aktarma + Son Aktiviteler visible",
+    "Demo Modu badge visible in header",
+    "Products page renders 14 edit buttons; ProductEditor modal opens; improve-title-btn + save-btn functional (Kaydedildi toast observed)",
+    "Import/Bulk/Export pages render with expected Turkish UI content"
+  ],
+  "failed": [],
+  "action_items": [],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "retest_needed": false,
+  "full_testing_deferred": true
+}
