@@ -87,6 +87,11 @@ credentials.json
 *.key
 .credentials
 
+# Allow committed example environment templates (never contain real secrets)
+!.env.example
+!backend/.env.example
+!frontend/.env.example
+
 # Local SQLite databases
 *.db
 *.sqlite
