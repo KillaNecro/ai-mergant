@@ -237,6 +237,14 @@ def revert(pid: str, rev_id: str, db: Session = Depends(get_db)):
 
 
 # ---------------- Bulk ----------------
+def _order_products(rows, ids):
+    """Return products in the order the caller supplied ids in — bulk endpoints
+    must be deterministic so a partial-failure batch behaves the same every
+    time. SQLAlchemy `id.in_(...)` does NOT preserve order."""
+    by_id = {p.id: p for p in rows}
+    return [by_id[i] for i in ids if i in by_id]
+
+
 @router.post("/bulk/analyze")
 def bulk_analyze(payload: BulkIdsIn, db: Session = Depends(get_db)):
     result = merchant_service.analyze_bulk(db, payload.ids)
@@ -246,7 +254,8 @@ def bulk_analyze(payload: BulkIdsIn, db: Session = Depends(get_db)):
 
 @router.post("/bulk/suggest")
 async def bulk_suggest(payload: BulkIdsIn, db: Session = Depends(get_db)):
-    products = db.query(Product).filter(Product.id.in_(payload.ids)).all()
+    rows = db.query(Product).filter(Product.id.in_(payload.ids)).all()
+    products = _order_products(rows, payload.ids)
     processed = failed = 0
     failures: list[dict] = []
     for p in products:
@@ -272,7 +281,8 @@ async def bulk_suggest(payload: BulkIdsIn, db: Session = Depends(get_db)):
 
 @router.post("/bulk/approve")
 def bulk_approve(payload: BulkIdsIn, db: Session = Depends(get_db)):
-    products = db.query(Product).filter(Product.id.in_(payload.ids)).all()
+    rows = db.query(Product).filter(Product.id.in_(payload.ids)).all()
+    products = _order_products(rows, payload.ids)
     approved = skipped = failed = 0
     skipped_reasons: list[dict] = []
     for p in products:
@@ -314,7 +324,8 @@ def bulk_approve(payload: BulkIdsIn, db: Session = Depends(get_db)):
 
 @router.post("/bulk/reject")
 def bulk_reject(payload: BulkIdsIn, db: Session = Depends(get_db)):
-    products = db.query(Product).filter(Product.id.in_(payload.ids)).all()
+    rows = db.query(Product).filter(Product.id.in_(payload.ids)).all()
+    products = _order_products(rows, payload.ids)
     rejected = skipped = 0
     for p in products:
         if not p.active_suggestion_id:

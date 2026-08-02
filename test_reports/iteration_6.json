@@ -1,0 +1,22 @@
+{
+  "summary": "Phase 2.1 REVERIFICATION after main agent applied the _order_products fix in /app/backend/merchant_routes.py. Confirmed the helper is defined at line 240 and called from bulk_suggest (L258), bulk_approve (L285), and bulk_reject (L328). Ran the full pytest suite 5 consecutive times as requested — every run reported 89 passed / 0 failed. The previously flaky test_bulk_suggest_partial_success_persists is now deterministic. /api/health returns 200 with demo_mode=true on the preview URL. BUG 1, BUG 2, BUG 3, BUG 4 fixes all covered by the green test suite. No regressions detected.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_phase2_1.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "_order_products helper cleanly resolves the DB-iteration-order flake and is applied consistently across all three bulk endpoints — good fix.",
+    "Minor (carried from iteration_5, non-blocking): in merchant_service.create_suggestion, when a prior draft is auto-rejected no revision/activity log entry is emitted — small audit gap, not required for Phase 2.1."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (89/89 across 5 consecutive runs)", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "none required",
+  "seed_data_creation": "None — tests use per-test temp SQLite DBs via conftest tmp_db fixture.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration_5 flake (bulk_suggest not preserving payload.ids order) is FIXED via _order_products in merchant_routes.py. Full suite is stable at 89/89 across 5 consecutive runs. To reverify: `cd /app/backend && for i in 1 2 3 4 5; do python -m pytest -q 2>&1 | tail -1; done`. Preview URL /api/health OK, demo_mode=true.",
+  "rca of the issue": "Resolved. Fix: `by_id = {p.id: p for p in rows}; products = [by_id[i] for i in ids if i in by_id]` (extracted into _order_products helper) is now called immediately after each bulk endpoint's `db.query(Product).filter(Product.id.in_(payload.ids)).all()`, forcing payload.ids iteration order and eliminating the SQLite ROWID-order nondeterminism that caused the ~40% flake."
+}
