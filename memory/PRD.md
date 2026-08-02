@@ -6,65 +6,51 @@ Türkçe B2B e-ticaret için AI destekli ürün hazırlama iş akışı:
 
 Orijinal içeri aktarılan veri, AI önerisinden ve onaylanan içerikten her zaman ayrı tutulur.
 
-## Architecture (Phase 2)
+## Architecture
 - **Backend:** FastAPI + SQLite + SQLAlchemy + Alembic. Modules: `server.py`, `merchant_routes.py`, `merchant_service.py`, `quality_service.py`, `revision_service.py`, `ai_service.py`.
-- **Frontend:** React + Tailwind, sidebar layout preserved.
-- **AI:** google-genai (Gemini) + deterministic Demo Mode. Provider failures raise `AIProviderError` → HTTP 502.
-- **Testing:** 81 pytest tests, all green. Frontend production build clean.
+- **Frontend:** React + Tailwind. Sidebar layout preserved.
+- **AI:** google-genai (Gemini) + deterministic Demo Mode. Provider failures → HTTP 502.
+- **Testing:** 89 pytest tests, stable across 5 consecutive runs.
 
-## Data model (Phase 2 additions)
-- `Product`: `workflow_status`, `quality_score`, `quality_analyzed_at`, `active_suggestion_id`
-- `ProductIssue`: id, product_id, issue_code, field_name, severity, message, recommendation, is_resolved, timestamps
-- `ProductSuggestion`: id, product_id, suggested_* fields, provider, model, suggestion_status, timestamps
-- `ProductRevision`: id, product_id, action_type, source, before_snapshot, after_snapshot, created_at
+## Workflow states
+- imported / needs_attention / ready_for_ai / awaiting_review / approved / ready_to_publish
 
-## Workflow states (Turkish labels)
-- `imported` → İçe Aktarıldı
-- `needs_attention` → Dikkat Gerekiyor (critical issues or score<60)
-- `ready_for_ai` → AI İçin Hazır (score≥60, no suggestion)
-- `awaiting_review` → İnceleme Bekliyor (draft suggestion)
-- `approved` → Onaylandı (approved but validation blocking)
-- `ready_to_publish` → Yayına Hazır (approved + validation ok)
+## Implemented — Phase 2.1 (2026-02, correctness fixes)
+- **BUG 1** — Approval validates the **effective publish candidate** (approved suggestion + original SKU/price/stock/image/product URL). AI-supplied description resolves original MISSING_DESCRIPTION. Original imported fields never overwritten. `merchant_service.effective_candidate()`, `passes_publish_validation()` rewritten, new `would_publish_if_approved()`.
+- **BUG 2** — Direct product PATCH now calls `merchant_service.analyze_and_transition`, refreshing issues, quality_score, workflow_status, and re-validating publish readiness. One activity entry.
+- **BUG 3** — `/api/bulk/suggest` commits after each successful product and rolls back only the failing product's pending work. First-succeed-then-fail scenarios keep the first product's suggestion. Also fixed non-deterministic iteration order — bulk endpoints now iterate in `payload.ids` order (5/5 stable pytest runs).
+- **BUG 4** — `/api/bulk/approve` pre-checks `would_publish_if_approved` before mutating. Draft suggestion untouched when candidate cannot become `ready_to_publish`; Turkish `Yayına hazır değil: …` reasons returned. Single-product approve still supports the `approved` intermediate state.
 
-## Implemented (2026-02 · Phase 2)
-**Backend**
-- Alembic `0002_merchant_core` (idempotent, preserves Phase 1 data)
-- Deterministic `quality_service.py` — 17 issue codes with stable weights; single source of truth for scoring
-- `merchant_service.py` — workflow transitions, create/edit/approve/reject suggestions, revert
-- `revision_service.py` — JSON snapshots
-- `ai_service.generate_suggestion` — demo (deterministic-v1) + Gemini JSON output, never invents specs
-- `merchant_routes.py` — 13 new endpoints (analyze, issues, suggest, patch, approve, reject, revisions, revert, bulk×4, ready-to-publish export)
-- Auto-analyze on import
-- Dashboard stats extended (average_quality_score, workflow buckets, open_critical_issues)
-- Product list filters: workflow_status, score_bucket (low/mid/high/critical)
+## Implemented — Phase 2 (Merchant Core)
+- Alembic `0002_merchant_core` migration (idempotent)
+- Deterministic quality engine, 17 issue codes
+- AI suggestions (Demo + Gemini), never invents specs
+- Human review workflow (approve/reject/edit/revert)
+- Ready-to-publish CSV export
+- Frontend: 4-tab ProductEditor, workflow filters, dashboard KPIs, BulkOps merchant actions
 
-**Frontend**
-- Dashboard: 8 new KPIs (Ortalama Kalite, Dikkat Gerekiyor, İnceleme Bekliyor, Onaylandı, Yayına Hazır, Kritik Sorun, etc.)
-- Products table: quality/issue-count/status columns; workflow + score filters
-- ProductEditor: 4 tabs (Orijinal Veri, AI Önerisi, Kalite Analizi, Revizyon Geçmişi) with side-by-side comparison for name/desc/category/SEO/meta/tags; buttons Kaliteyi Analiz Et, AI Önerisi Oluştur, Öneriyi Kaydet, Onayla, Reddet, Önceki Sürüme Dön
-- Export: "Yayına Hazır Ürünleri Dışa Aktar" card
-- BulkOps: 4 new merchant actions (analyze/suggest/approve/reject) with confirmation dialogs
+## Implemented — Phase 1 & Cleanup
+- CSV/XML import with defusedxml, TR column mapping, encoding support
+- Alembic-only migrations, UTC timestamps, SAVEPOINT accounting
+- Trimmed requirements.txt, .gitignore covers *.db and .env
 
-## Testing
+## Test result
 ```
 cd backend && python -m pytest -q
-81 passed
+89 passed
 ```
-Coverage: import safety (Phase 1 preserved), quality engine, workflow transitions, AI failure surfacing, revisions/revert, bulk approve eligibility, ready-to-publish export.
+5-in-a-row stable. Includes 8 new tests in `tests/test_phase2_1.py` covering all four Phase 2.1 bugs.
 
-## Known remaining issues (Phase 3 candidates)
-- server.py + merchant_routes.py combined is ~1000 lines — router package split deferred
-- Bulk API request schemas need OpenAPI descriptions
-- Duplicate-title detection is O(N²); acceptable at N<10k but should switch to indexed subquery later
-- Migration doesn't run analysis for legacy products; they remain `imported` until user clicks "Analyze All"
+## Files changed (Phase 2.1)
+- **Backend modified:** `merchant_service.py`, `merchant_routes.py`, `server.py`
+- **Backend new:** `tests/test_phase2_1.py`
+- **No frontend changes** (all four bugs backend-side)
 
-## Restrictions (respected)
-No auth, no payments, no Stripe/Woo/İkas/Shopier/Instagram/Meta, no image gen, no XLSX, no Redis/Celery, no multi-tenant, no visual rebrand.
+## Known remaining issues (deferred)
+- `server.py` + `merchant_routes.py` combined ~1000 lines — router package split still deferred
+- `create_suggestion`'s auto-rejection of prior draft doesn't emit a separate revision entry (minor audit gap)
+- Duplicate-title detection is O(N²) — fine at N<10k
+- Legacy Phase 1 products stay `imported` until user triggers Analyze All
 
-## Backlog (Phase 3+)
-- P1: Gemini key entry from Ayarlar UI
-- P1: Router split (`routers/` package)
-- P1: XLSX import
-- P2: Automated analyze-on-schedule for legacy data
-- P2: Multi-language suggestion output
-- P2: Product-image validation ping check
+## Restrictions respected
+No auth, no payments, no marketplace integrations, no image gen, no XLSX, no Redis/Celery, no multi-tenant, no visual rebrand, no overwriting of original imported data.
