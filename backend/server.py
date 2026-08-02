@@ -30,6 +30,7 @@ import ai_service  # noqa: E402
 from ai_service import AIProviderError  # noqa: E402
 import merchant_routes  # noqa: E402
 import merchant_service  # noqa: E402
+import woocommerce_routes  # noqa: E402
 from merchant_service import STATUS_LABELS  # noqa: E402
 from sample_data import seed as seed_samples  # noqa: E402
 
@@ -962,6 +963,7 @@ def export_filtered(
 # --- App wiring ----------------------------------------------------------
 app.include_router(api)
 app.include_router(merchant_routes.router)
+app.include_router(woocommerce_routes.router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

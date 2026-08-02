@@ -31,6 +31,8 @@ def tmp_db(monkeypatch):
         "server", "merchant_routes", "merchant_service",
         "quality_service", "revision_service",
         "sample_data", "ai_service", "models", "database",
+        "woocommerce_routes", "woocommerce_schemas",
+        "integrations", "integrations.woocommerce_client",
     ]:
         if mod in sys.modules:
             del sys.modules[mod]
