@@ -12,18 +12,19 @@ const Layout = () => {
   }, []);
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-white text-[#0A1128]">
+    <div className="flex h-screen w-full overflow-hidden text-[#0A1128]">
       <Sidebar />
-      <div className="flex-1 flex flex-col h-screen overflow-y-auto bg-white">
-        <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-slate-200 bg-white px-6">
+      <div className="flex-1 flex flex-col h-screen overflow-y-auto">
+        <header className="sticky top-0 z-10 flex h-14 items-center justify-between border-b border-slate-200/80 bg-white/80 backdrop-blur px-6 supports-[backdrop-filter]:bg-white/60">
           <div className="text-sm font-medium text-slate-500">
             AI Destekli Ürün Kataloğu Yönetimi
           </div>
           {demoMode && (
             <span
               data-testid="demo-mode-badge"
-              className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700 tracking-wide uppercase"
+              className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-700 tracking-wide uppercase"
             >
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
               Demo Modu
             </span>
           )}
