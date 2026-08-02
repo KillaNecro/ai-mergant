@@ -82,6 +82,26 @@ const BulkOps = () => {
     } finally { setBusy(false); }
   };
 
+  const runMerchant = async (kind, label, endpoint, successMsg) => {
+    if (!requireSelected() || busy) return;
+    if (!confirmLarge(label)) return;
+    setBusy(true);
+    try {
+      const res = await api.post(endpoint, { ids: ids() });
+      const d = res.data || {};
+      const parts = [];
+      if (d.approved !== undefined) parts.push(`onaylandı: ${d.approved}`);
+      if (d.rejected !== undefined) parts.push(`reddedildi: ${d.rejected}`);
+      if (d.processed !== undefined) parts.push(`işlendi: ${d.processed}`);
+      if (d.skipped) parts.push(`atlandı: ${d.skipped}`);
+      if (d.failed) parts.push(`hata: ${d.failed}`);
+      toast.success(`${successMsg}${parts.length ? " (" + parts.join(", ") + ")" : ""}`);
+      load();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "İşlem başarısız");
+    } finally { setBusy(false); }
+  };
+
   return (
     <div className="space-y-6" data-testid="bulk-page">
       <div>
@@ -93,6 +113,10 @@ const BulkOps = () => {
         <ActionCard title="AI ile Başlık İyileştir" icon={Sparkles} onClick={improveTitles} testid="bulk-improve-titles" disabled={busy} />
         <ActionCard title="AI ile Açıklama İyileştir" icon={Sparkles} onClick={improveDescs} testid="bulk-improve-descs" disabled={busy} />
         <ActionCard title="Seçilenleri Dışa Aktar" icon={Download} onClick={exportSel} testid="bulk-export" disabled={busy} />
+        <ActionCard title="Kaliteyi Analiz Et" icon={Sparkles} onClick={() => runMerchant("analyze", "Kalite Analizi", "/bulk/analyze", "Analiz tamamlandı")} testid="bulk-analyze" disabled={busy} />
+        <ActionCard title="AI Önerisi Oluştur" icon={Sparkles} onClick={() => runMerchant("suggest", "AI Önerisi Oluştur", "/bulk/suggest", "AI önerileri oluşturuldu")} testid="bulk-suggest" disabled={busy} />
+        <ActionCard title="Önerileri Onayla" icon={Sparkles} onClick={() => runMerchant("approve", "Öneri Onayla", "/bulk/approve", "Öneriler onaylandı")} testid="bulk-approve" disabled={busy} />
+        <ActionCard title="Önerileri Reddet" icon={Sparkles} onClick={() => runMerchant("reject", "Öneri Reddet", "/bulk/reject", "Öneriler reddedildi")} testid="bulk-reject" disabled={busy} />
         <div className="bg-white border border-slate-200 rounded-md shadow-sm p-5 space-y-3">
           <div className="flex items-center gap-2 text-sm font-medium text-[#0A1128]"><Tags size={16} /> Kategori Ata</div>
           <input list="cats" value={newCategory} onChange={(e) => setNewCategory(e.target.value)}

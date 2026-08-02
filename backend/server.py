@@ -25,9 +25,12 @@ ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
 
 from database import Base, SessionLocal, engine, get_db  # noqa: E402,F401
-from models import Activity, Meta, Product  # noqa: E402
+from models import Activity, Meta, Product, ProductIssue, ProductSuggestion  # noqa: E402
 import ai_service  # noqa: E402
 from ai_service import AIProviderError  # noqa: E402
+import merchant_routes  # noqa: E402
+import merchant_service  # noqa: E402
+from merchant_service import STATUS_LABELS  # noqa: E402
 from sample_data import seed as seed_samples  # noqa: E402
 
 logger = logging.getLogger("merchant-os")
@@ -231,11 +234,17 @@ class ProductOut(BaseModel):
     image_url: Optional[str] = None
     product_url: Optional[str] = None
     is_edited: bool = False
+    workflow_status: str = "imported"
+    quality_score: Optional[int] = None
+    quality_analyzed_at: Optional[datetime] = None
+    active_suggestion_id: Optional[str] = None
     updated_at: datetime
 
     def to_dict(self) -> dict:
         d = self.model_dump()
         d["updated_at"] = _iso_utc(self.updated_at)
+        d["quality_analyzed_at"] = _iso_utc(self.quality_analyzed_at)
+        d["workflow_status_label"] = STATUS_LABELS.get(self.workflow_status, self.workflow_status)
         return d
 
 
@@ -450,6 +459,7 @@ def health():
 
 @api.get("/dashboard/stats")
 def dashboard_stats(db: Session = Depends(get_db)):
+    from sqlalchemy import func
     total = db.query(Product).count()
     missing_desc = db.query(Product).filter(
         or_(Product.description.is_(None), Product.description == "")
@@ -457,6 +467,17 @@ def dashboard_stats(db: Session = Depends(get_db)):
     missing_price = db.query(Product).filter(Product.price.is_(None)).count()
     edited = db.query(Product).filter(Product.is_edited.is_(True)).count()
     last_import = db.query(Meta).filter(Meta.key == "last_import_at").first()
+
+    avg_row = db.query(func.avg(Product.quality_score)).filter(Product.quality_score.isnot(None)).first()
+    avg_score = float(avg_row[0]) if avg_row and avg_row[0] is not None else None
+    by_status = dict(
+        db.query(Product.workflow_status, func.count(Product.id))
+        .group_by(Product.workflow_status).all()
+    )
+    critical_open = db.query(func.count(ProductIssue.id)).filter(
+        ProductIssue.severity == "critical", ProductIssue.is_resolved.is_(False)
+    ).scalar() or 0
+
     activities = (
         db.query(Activity).order_by(Activity.created_at.desc()).limit(10).all()
     )
@@ -466,6 +487,14 @@ def dashboard_stats(db: Session = Depends(get_db)):
         "missing_price": missing_price,
         "edited_products": edited,
         "last_import_at": last_import.value if last_import else None,
+        "average_quality_score": round(avg_score, 1) if avg_score is not None else None,
+        "needs_attention": by_status.get("needs_attention", 0),
+        "awaiting_review": by_status.get("awaiting_review", 0),
+        "ready_for_ai": by_status.get("ready_for_ai", 0),
+        "approved": by_status.get("approved", 0),
+        "ready_to_publish": by_status.get("ready_to_publish", 0),
+        "imported": by_status.get("imported", 0),
+        "open_critical_issues": critical_open,
         "recent_activities": [
             {
                 "id": a.id,
@@ -479,7 +508,8 @@ def dashboard_stats(db: Session = Depends(get_db)):
 
 
 # --- Products ------------------------------------------------------------
-def _apply_filters(query, q, category, missing_desc, missing_price, in_stock, edited):
+def _apply_filters(query, q, category, missing_desc, missing_price, in_stock, edited,
+                   workflow_status=None, score_bucket=None):
     if q:
         like = f"%{q}%"
         query = query.filter(or_(Product.name.ilike(like), Product.sku.ilike(like)))
@@ -493,6 +523,18 @@ def _apply_filters(query, q, category, missing_desc, missing_price, in_stock, ed
         query = query.filter(Product.stock > 0)
     if edited:
         query = query.filter(Product.is_edited.is_(True))
+    if workflow_status:
+        query = query.filter(Product.workflow_status == workflow_status)
+    if score_bucket == "low":
+        query = query.filter(Product.quality_score < 60)
+    elif score_bucket == "mid":
+        query = query.filter(Product.quality_score >= 60, Product.quality_score < 85)
+    elif score_bucket == "high":
+        query = query.filter(Product.quality_score >= 85)
+    elif score_bucket == "critical":
+        query = query.join(
+            ProductIssue, ProductIssue.product_id == Product.id
+        ).filter(ProductIssue.severity == "critical", ProductIssue.is_resolved.is_(False)).distinct()
     return query
 
 
@@ -504,11 +546,14 @@ def list_products(
     missing_price: bool = False,
     in_stock: bool = False,
     edited: bool = False,
+    workflow_status: Optional[str] = None,
+    score_bucket: Optional[str] = None,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    query = _apply_filters(db.query(Product), q, category, missing_desc, missing_price, in_stock, edited)
+    query = _apply_filters(db.query(Product), q, category, missing_desc, missing_price,
+                            in_stock, edited, workflow_status, score_bucket)
     total = query.count()
     items = (
         query.order_by(Product.updated_at.desc())
@@ -516,11 +561,25 @@ def list_products(
         .limit(page_size)
         .all()
     )
+    # Attach unresolved issue counts in one query.
+    ids = [p.id for p in items]
+    counts: dict[str, int] = {}
+    if ids:
+        from sqlalchemy import func
+        rows = (db.query(ProductIssue.product_id, func.count(ProductIssue.id))
+                .filter(ProductIssue.product_id.in_(ids), ProductIssue.is_resolved.is_(False))
+                .group_by(ProductIssue.product_id).all())
+        counts = {pid: c for pid, c in rows}
+    result_items = []
+    for p in items:
+        d = ProductOut.model_validate(p).to_dict()
+        d["issue_count"] = counts.get(p.id, 0)
+        result_items.append(d)
     return {
         "total": total,
         "page": page,
         "page_size": page_size,
-        "items": [ProductOut.model_validate(p).to_dict() for p in items],
+        "items": result_items,
     }
 
 
@@ -731,6 +790,23 @@ def import_commit(payload: MappingIn, db: Session = Depends(get_db)):
         f"İçe aktarma: +{inserted} yeni, {updated} güncelleme, {skipped} atlandı, {failed} hata",
     )
     db.commit()
+
+    # Auto-analyze touched products (silent — no separate activity log).
+    sku_col = mapping.get("sku")
+    touched_skus = set()
+    if sku_col:
+        for r in payload.rows:
+            raw = r.get(sku_col)
+            if raw:
+                s = _normalize_sku(raw)
+                if s:
+                    touched_skus.add(s)
+    if touched_skus:
+        touched = db.query(Product).filter(Product.sku.in_(touched_skus)).all()
+        for p in touched:
+            merchant_service.analyze_and_transition(db, p)
+        db.commit()
+
     return {
         "inserted": inserted,
         "updated": updated,
@@ -866,6 +942,18 @@ def export_filtered(
     _log_activity(db, "export", f"Filtrelenmiş ürünler dışa aktarıldı: {len(products)}")
     db.commit()
     return _csv_response(products)
+
+
+# --- App wiring ----------------------------------------------------------
+app.include_router(api)
+app.include_router(merchant_routes.router)
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # --- App wiring ----------------------------------------------------------

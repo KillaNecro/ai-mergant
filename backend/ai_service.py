@@ -1,14 +1,16 @@
-"""AI service abstraction.
+"""AI service: Demo Mode + Gemini via google-genai.
 
-- If GEMINI_API_KEY is set: uses the official google-genai SDK.
-- Otherwise: deterministic Turkish Demo Mode.
+Phase 2 adds `generate_suggestion` producing a structured payload:
+    { provider, model, suggested_name, suggested_description,
+      suggested_category, suggested_seo_title, suggested_meta_description,
+      suggested_tags: [str, ...] }
 
-If Gemini is configured but the request fails, the caller receives an
-`AIProviderError` — we never silently fall back to Demo Mode when a key
-is present, per Phase 1 requirements.
+Never invents technical specs. Preserves brands/codes/measurements. On
+Gemini failure the caller receives AIProviderError — no silent fallback.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 from typing import Optional
@@ -26,8 +28,7 @@ def gemini_model() -> str:
     return os.environ.get("GEMINI_MODEL", "gemini-2.0-flash").strip() or "gemini-2.0-flash"
 
 
-# ---------------- Deterministic Demo Generator ---------------- #
-
+# ---------------- Deterministic Demo ----------------
 _TR_STOPWORDS = {
     "ve", "ile", "için", "bir", "bu", "şu", "olan", "olarak",
     "en", "çok", "yeni", "orijinal", "kaliteli", "süper", "harika",
@@ -71,7 +72,6 @@ def _clean_title(text: str) -> str:
 
 
 def _preserved_codes(*sources: Optional[str]) -> list[str]:
-    """Extract model/measurement codes to preserve (never invent)."""
     preserved: list[str] = []
     seen: set[str] = set()
     for src in sources:
@@ -108,8 +108,22 @@ def _demo_description(name: str, category: Optional[str], original: Optional[str
     return "\n".join(lines)
 
 
-# ---------------- Gemini Integration (google-genai) ---------------- #
+def _demo_tags(name: str, category: Optional[str]) -> list[str]:
+    tokens: list[str] = []
+    if category:
+        tokens.append(category.strip().lower())
+    for tok in re.findall(r"[A-Za-zĞÜŞİÖÇğüşıöç0-9]+", name or ""):
+        low = tok.lower()
+        if low in _TR_STOPWORDS or len(low) < 3:
+            continue
+        if low not in tokens:
+            tokens.append(low)
+        if len(tokens) >= 8:
+            break
+    return tokens
 
+
+# ---------------- Gemini ----------------
 _SYSTEM_INSTRUCTION = (
     "Sen bir Türkçe e-ticaret içerik uzmanısın. Ürün başlıklarını ve "
     "açıklamalarını profesyonel, kısa, SEO uyumlu şekilde iyileştir. "
@@ -123,7 +137,7 @@ def _gemini_call(prompt: str) -> str:
     api_key = os.environ["GEMINI_API_KEY"]
     try:
         from google import genai  # type: ignore
-    except ImportError as exc:  # pragma: no cover - install issue
+    except ImportError as exc:  # pragma: no cover
         raise AIProviderError(f"google-genai paketi yüklü değil: {exc}") from exc
     try:
         client = genai.Client(api_key=api_key)
@@ -141,8 +155,7 @@ def _gemini_call(prompt: str) -> str:
         raise AIProviderError(f"Gemini isteği başarısız: {exc}") from exc
 
 
-# ---------------- Public API ---------------- #
-
+# ---------------- Public single-field helpers ----------------
 async def improve_title(name: str, category: Optional[str] = None) -> str:
     if is_demo_mode():
         return _clean_title(name)
@@ -171,3 +184,109 @@ async def improve_description(
         f"Mevcut Açıklama: {original or '-'}"
     )
     return _gemini_call(prompt)
+
+
+# ---------------- Suggestion (Phase 2) ----------------
+def _demo_suggestion(
+    name: str, description: Optional[str], category: Optional[str],
+) -> dict:
+    clean_name = _clean_title(name) or name
+    desc = _demo_description(name, category, description)
+    seo_title = clean_name[:60].rstrip()
+    first_line = desc.split("\n", 1)[0].strip()
+    meta = (first_line[:155]).rstrip() if first_line else clean_name[:155]
+    tags = _demo_tags(name, category)
+    return {
+        "provider": "demo",
+        "model": "deterministic-v1",
+        "suggested_name": clean_name,
+        "suggested_description": desc,
+        "suggested_category": category or None,
+        "suggested_seo_title": seo_title,
+        "suggested_meta_description": meta,
+        "suggested_tags": tags,
+    }
+
+
+def _extract_json(text: str) -> Optional[dict]:
+    if not text:
+        return None
+    # Try direct parse; else find first {...} block
+    try:
+        return json.loads(text)
+    except (TypeError, ValueError):
+        pass
+    m = re.search(r"\{.*\}", text, flags=re.DOTALL)
+    if not m:
+        return None
+    try:
+        return json.loads(m.group(0))
+    except (TypeError, ValueError):
+        return None
+
+
+async def generate_suggestion(
+    *,
+    name: str,
+    description: Optional[str],
+    category: Optional[str],
+    image_url: Optional[str] = None,
+    product_url: Optional[str] = None,
+    price: Optional[float] = None,
+    issue_codes: Optional[list[str]] = None,
+) -> dict:
+    """Return a structured suggestion payload.
+
+    Demo Mode → conservative deterministic content.
+    Gemini    → structured JSON via strict prompt; raises AIProviderError on failure.
+    """
+    if is_demo_mode():
+        return _demo_suggestion(name, description, category)
+
+    issues_hint = ""
+    if issue_codes:
+        issues_hint = "\nMevcut kalite sorunları: " + ", ".join(issue_codes)
+
+    prompt = (
+        "Aşağıdaki ürün için Türkçe bir e-ticaret önerisi hazırla. Yanıtı SADECE "
+        "aşağıdaki alanları içeren geçerli bir JSON nesnesi olarak döndür. "
+        "Ek açıklama, kod bloğu veya metin ekleme.\n"
+        "Alanlar: suggested_name (string), suggested_description (string), "
+        "suggested_category (string), suggested_seo_title (string, <=60 karakter), "
+        "suggested_meta_description (string, <=155 karakter), "
+        "suggested_tags (max 8 kelime, dize dizisi).\n\n"
+        "KURALLAR:\n"
+        "- Boyut, malzeme, model numarası, uyumluluk veya sertifika UYDURMA.\n"
+        "- Marka, SKU, ürün kodu ve ölçüleri OLDUĞU GİBİ koru.\n"
+        "- Kaynakta yer almayan pazarlama iddialarında bulunma.\n"
+        "- Fiyat, stok veya orijinal veriyi değiştirmeye çalışma.\n\n"
+        f"Ürün:\n- Adı: {name}\n- Kategori: {category or '-'}\n"
+        f"- Fiyat: {price if price is not None else '-'}\n"
+        f"- Görsel URL: {image_url or '-'}\n"
+        f"- Ürün URL: {product_url or '-'}\n"
+        f"- Mevcut açıklama: {description or '-'}"
+        f"{issues_hint}"
+    )
+    raw = _gemini_call(prompt)
+    data = _extract_json(raw)
+    if not isinstance(data, dict):
+        raise AIProviderError("Gemini yanıtı JSON olarak çözümlenemedi")
+
+    def _s(v):
+        return v.strip() if isinstance(v, str) else None
+
+    tags = data.get("suggested_tags") or []
+    if not isinstance(tags, list):
+        tags = []
+    tags = [str(t).strip() for t in tags if str(t).strip()][:8]
+
+    return {
+        "provider": "gemini",
+        "model": gemini_model(),
+        "suggested_name": _s(data.get("suggested_name")) or _clean_title(name),
+        "suggested_description": _s(data.get("suggested_description")),
+        "suggested_category": _s(data.get("suggested_category")) or category,
+        "suggested_seo_title": (_s(data.get("suggested_seo_title")) or "")[:60] or None,
+        "suggested_meta_description": (_s(data.get("suggested_meta_description")) or "")[:155] or None,
+        "suggested_tags": tags,
+    }

@@ -1,0 +1,26 @@
+{
+  "summary": "Phase 2 Merchant Core verified end-to-end. (1) Backend pytest: 81 collected, 81 passed in ~12s (matches spec). Full suite covers test_quality (8), test_workflow (12), test_suggestions (4), test_accounting, test_import, test_products, test_export, test_ai, test_xml, test_ai_failure, test_live_integration. (2) Alembic 0002_merchant_core applied on top of Phase 1 DB — preview DB shows Product.workflow_status/quality_score/quality_analyzed_at/active_suggestion_id populated (36 products preserved, 13 edited). (3) Deterministic quality engine live: POST /api/products/{id}/analyze on TEST_NUM_4 returned score=51 with 5 issues including TITLE_TOO_SHORT (warning), MISSING_DESCRIPTION (critical). Idempotency confirmed by test_quality.py. (4) Workflow transitions verified via live API: score=51 with critical issue → workflow_status='needs_attention'; after /suggest → active_suggestion_id set and status → 'awaiting_review'; after /suggestion/approve with critical issues → suggestion_status='approved' + workflow_status='approved' (blocking_reasons surfaced via activity 'yayına hazır değil: 1 kritik kalite sorunu var'). (5) Demo AI suggestion: provider='demo', model='deterministic-v1', suggested_name/description generated without modifying product.name/description (name stayed 'D'). (6) /api/products supports workflow_status and score_bucket filters — score_bucket=critical returned total=11 with first item quality_score=51; workflow_status=awaiting_review returned the seeded row. Response items include workflow_status, workflow_status_label ('İnceleme Bekliyor'), quality_score, issue_count. (7) /api/dashboard/stats includes all extended KPIs: average_quality_score=37.8, needs_attention=11, awaiting_review, ready_for_ai=1, approved, ready_to_publish=0, imported=24, open_critical_issues=17. (8) /api/export/ready-to-publish returns UTF-8 BOM CSV with correct header row (sku,approved_name,approved_description,approved_category,seo_title,meta_description,tags,price,stock,image_url,product_url,quality_score,workflow_status). (9) /api/bulk/approve accepts {ids:[...]} payload and returns {processed,approved,skipped,failed,reasons}. (10) Frontend production build: CI=true DISABLE_ESLINT_PLUGIN=true yarn build succeeded (Done in 16.22s). (11) Live UI regression on preview URL: Dashboard renders all new KPIs (Toplam Ürün 36, Ortalama Kalite 37.8, Dikkat Gerekiyor 10, Kritik Sorun 17, İnceleme Bekliyor 0, Onaylandı 1, Yayına Hazır 0, Düzenlenen 13). Products table shows Kalite/Sorun/Durum columns with color-coded badges ('Dikkat Gerekiyor', 'AI İçin Hazır', 'Onaylandı', 'İçe Aktarıldı') and workflow/score filter dropdowns ('Tüm Durumlar', 'Tüm Skorlar'). ProductEditor modal opens with 4 tabs (Orijinal Veri / AI Önerisi / Kalite Analizi (5) / Revizyon Geçmişi) and Kaliteyi Analiz Et + AI Önerisi Oluştur action buttons in header. Export page shows distinct 'Yayına Hazır Ürünleri Dışa Aktar' card above the classic 'Tümünü İndir'/'Kriterlere Göre' cards. BulkOps has all 4 new merchant actions (Kaliteyi Analiz / AI Önerisi / Onayla / Reddet). Turkish labels intact, DEMO MODU badge shown, no console errors.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_quality.py",
+    "/app/backend/tests/test_workflow.py",
+    "/app/backend/tests/test_suggestions.py",
+    "/app/backend/tests/test_ai_failure.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py + merchant_routes.py combined footprint is large; consider grouping into a `routers/` package (products, import_export, ai_suggestions, bulk, dashboard) as endpoint count grows.",
+    "Bulk endpoints use `{ids:[...]}` payload; the request-schema key should be documented in README / OpenAPI descriptions for frontend contributors (Pydantic model currently only surfaces via 422 error).",
+    "Export /api/export/ready-to-publish only exposes GET (HEAD returns 405 as expected in FastAPI); ok but front-end CSV download must use GET not HEAD."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (81/81 pytest)", "frontend": "100% (build clean, all Phase 2 pages/components render)"},
+  "test_credentials": "none required (no auth in app)",
+  "seed_data_creation": "No new seed rows created; existing TEST_NUM_4 was analyzed → suggested → approved during live smoke to exercise the full workflow.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Phase 2 Merchant Core is stable. Full pytest: `cd /app/backend && python -m pytest` → 81 passed. Frontend build: `cd /app/frontend && CI=true DISABLE_ESLINT_PLUGIN=true yarn build`. Bulk endpoints accept `{ids:[...]}`. Ready-to-publish export is GET only (HEAD → 405). Note: TEST_NUM_4 was left in workflow_status='approved' after live suggestion approval — main agent can call /suggestion/reject after any revision or reset via sample_data.py if a clean slate is required.",
+  "rca of the issue": "n/a - no bugs found"
+}

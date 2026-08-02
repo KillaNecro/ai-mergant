@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { api, API_BASE } from "../lib/api";
-import { Download, AlertCircle } from "lucide-react";
+import { Download, AlertCircle, Rocket } from "lucide-react";
 import { toast } from "sonner";
 
 const ExportPage = () => {
@@ -17,8 +17,7 @@ const ExportPage = () => {
 
   const download = (blob, name) => {
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = name; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = name; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -46,6 +45,17 @@ const ExportPage = () => {
     finally { setBusyKind(""); }
   };
 
+  const exportReady = async () => {
+    if (busyKind) return;
+    setBusyKind("ready");
+    try {
+      const res = await api.get("/export/ready-to-publish", { responseType: "blob" });
+      download(res.data, "yayina-hazir-urunler.csv");
+      toast.success("Yayına hazır ürünler indirildi");
+    } catch (e) { toast.error(e?.response?.data?.detail || "Dışa aktarma başarısız"); }
+    finally { setBusyKind(""); }
+  };
+
   return (
     <div className="space-y-6" data-testid="export-page">
       <div>
@@ -53,11 +63,25 @@ const ExportPage = () => {
         <p className="text-sm text-slate-600 mt-1">UTF-8 CSV formatında, Türkçe karakter uyumlu.</p>
       </div>
 
+      <div className="bg-white border border-emerald-200 rounded-md shadow-sm p-6" data-testid="ready-to-publish-card">
+        <div className="flex items-center gap-2 text-xs text-emerald-700 uppercase tracking-widest font-semibold">
+          <Rocket size={14} /> Yayına Hazır
+        </div>
+        <h2 className="text-lg font-semibold tracking-tight text-[#0A1128] mt-2">Yayına Hazır Ürünleri Dışa Aktar</h2>
+        <p className="text-sm text-slate-600 mt-1">
+          Yalnızca onaylı ve nihai doğrulamayı geçmiş ürünleri, SEO başlığı, meta açıklama ve etiketlerle birlikte indirir.
+        </p>
+        <button data-testid="export-ready-btn" onClick={exportReady} disabled={busyKind === "ready"}
+          className="mt-5 inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md px-4 py-2 text-sm font-medium disabled:opacity-60">
+          <Download size={14} /> {busyKind === "ready" ? "Hazırlanıyor..." : "Yayına Hazır Ürünleri İndir"}
+        </button>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white border border-slate-200 rounded-md shadow-sm p-6">
-          <div className="text-xs text-slate-500 uppercase tracking-widest">Hızlı Dışa Aktar</div>
+          <div className="text-xs text-slate-500 uppercase tracking-widest">Tüm Katalog</div>
           <h2 className="text-lg font-semibold tracking-tight text-[#0A1128] mt-2">Tüm Ürünler</h2>
-          <p className="text-sm text-slate-600 mt-1">Katalogdaki tüm ürünleri tek dosyada indirin.</p>
+          <p className="text-sm text-slate-600 mt-1">Katalogdaki tüm ürünleri tek dosyada indirin (orijinal alanlar).</p>
           <button data-testid="export-all-btn" onClick={exportAll} disabled={busyKind === "all"}
             className="mt-5 inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md px-4 py-2 text-sm font-medium disabled:opacity-60">
             <Download size={14} /> {busyKind === "all" ? "Hazırlanıyor..." : "Tümünü İndir"}

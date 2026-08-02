@@ -1,14 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import { Package, FileText, DollarSign, Wand2, Clock, AlertCircle } from "lucide-react";
+import { Package, FileText, DollarSign, Wand2, Clock, AlertCircle, Gauge, Eye, CheckCircle2, Rocket, ShieldAlert } from "lucide-react";
 
-const StatCard = ({ label, value, icon: Icon, testid }) => (
+const StatCard = ({ label, value, icon: Icon, testid, tone }) => (
   <div data-testid={testid} className="bg-white border border-slate-200 rounded-md shadow-sm p-6">
     <div className="flex items-center justify-between">
       <div className="text-xs text-slate-500 font-medium uppercase tracking-widest">{label}</div>
-      <Icon size={16} className="text-slate-400" strokeWidth={1.75} />
+      <Icon size={16} className={tone || "text-slate-400"} strokeWidth={1.75} />
     </div>
-    <div className="mt-3 text-2xl font-semibold text-[#0A1128] tracking-tight">{value}</div>
+    <div className="mt-3 text-2xl font-semibold text-[#0A1128] tracking-tight">{value ?? "—"}</div>
   </div>
 );
 
@@ -36,7 +36,7 @@ const Dashboard = () => {
   if (error) return (
     <div data-testid="dashboard-error" className="border border-red-200 bg-red-50 rounded-md p-6 text-sm text-red-700 flex items-center gap-2">
       <AlertCircle size={16} /> {error}
-      <button onClick={load} className="ml-auto font-medium text-blue-700 hover:text-blue-800">Tekrar dene</button>
+      <button onClick={load} className="ml-auto font-medium text-blue-700">Tekrar dene</button>
     </div>
   );
   if (!stats) return null;
@@ -45,14 +45,26 @@ const Dashboard = () => {
     <div className="space-y-6" data-testid="dashboard-page">
       <div>
         <h1 className="text-2xl sm:text-3xl tracking-tight font-semibold text-[#0A1128]">Genel Bakış</h1>
-        <p className="text-sm text-slate-600 mt-1">Katalog durumunuza dair özet bilgiler.</p>
+        <p className="text-sm text-slate-600 mt-1">Katalog kalitesi ve yayına hazırlık iş akışı özeti.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         <StatCard label="Toplam Ürün" value={stats.total_products} icon={Package} testid="stat-total" />
+        <StatCard label="Ortalama Kalite" value={stats.average_quality_score ?? "—"} icon={Gauge} testid="stat-avg-score" tone="text-blue-500" />
+        <StatCard label="Dikkat Gerekiyor" value={stats.needs_attention} icon={ShieldAlert} testid="stat-needs-attention" tone="text-red-500" />
+        <StatCard label="Kritik Sorun" value={stats.open_critical_issues} icon={AlertCircle} testid="stat-critical-issues" tone="text-red-500" />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+        <StatCard label="İnceleme Bekliyor" value={stats.awaiting_review} icon={Eye} testid="stat-awaiting" tone="text-amber-500" />
+        <StatCard label="Onaylandı" value={stats.approved} icon={CheckCircle2} testid="stat-approved" tone="text-emerald-500" />
+        <StatCard label="Yayına Hazır" value={stats.ready_to_publish} icon={Rocket} testid="stat-ready" tone="text-emerald-600" />
+        <StatCard label="Düzenlenen" value={stats.edited_products} icon={Wand2} testid="stat-edited" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
         <StatCard label="Eksik Açıklama" value={stats.missing_description} icon={FileText} testid="stat-missing-desc" />
         <StatCard label="Eksik Fiyat" value={stats.missing_price} icon={DollarSign} testid="stat-missing-price" />
-        <StatCard label="Düzenlenen Ürün" value={stats.edited_products} icon={Wand2} testid="stat-edited" />
       </div>
 
       <div className="bg-white border border-slate-200 rounded-md shadow-sm p-6">

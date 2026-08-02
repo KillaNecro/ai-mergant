@@ -27,7 +27,11 @@ def tmp_db(monkeypatch):
     monkeypatch.setenv("DISABLE_MIGRATIONS", "1")
 
     # Reload modules so they pick up the new SQLITE_PATH.
-    for mod in ["server", "sample_data", "ai_service", "models", "database"]:
+    for mod in [
+        "server", "merchant_routes", "merchant_service",
+        "quality_service", "revision_service",
+        "sample_data", "ai_service", "models", "database",
+    ]:
         if mod in sys.modules:
             del sys.modules[mod]
 
