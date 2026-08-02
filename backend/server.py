@@ -613,6 +613,9 @@ def update_product(pid: str, payload: ProductUpdate, db: Session = Depends(get_d
     for k, v in data.items():
         setattr(p, k, v)
     p.is_edited = True
+    # Phase 2.1: direct edits must re-run analysis + refresh workflow status
+    # (including re-checking publish readiness for approved suggestions).
+    merchant_service.analyze_and_transition(db, p)
     _log_activity(db, "edit", f"Ürün güncellendi: {p.sku}")
     try:
         db.commit()

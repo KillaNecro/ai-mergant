@@ -252,13 +252,19 @@ async def bulk_suggest(payload: BulkIdsIn, db: Session = Depends(get_db)):
     for p in products:
         try:
             await merchant_service.create_suggestion(db, p)
+            db.commit()  # persist each success independently
             processed += 1
         except AIProviderError as exc:
+            # This product's pending changes get rolled back; prior committed
+            # products are safe. Continue with the next product so a transient
+            # provider error doesn't stop the batch.
             db.rollback()
             failed += 1
             failures.append({"product_id": p.id, "sku": p.sku, "reason": str(exc)})
-            # Stop early on provider failure — user needs to fix the key.
-            break
+        except Exception as exc:
+            db.rollback()
+            failed += 1
+            failures.append({"product_id": p.id, "sku": p.sku, "reason": str(exc)})
     db.add(Activity(kind="bulk", message=f"Toplu AI önerisi: {processed} başarılı, {failed} hata"))
     db.commit()
     return {"processed": processed, "failed": failed, "failures": failures}
@@ -278,6 +284,16 @@ def bulk_approve(payload: BulkIdsIn, db: Session = Depends(get_db)):
         if sug is None or sug.suggestion_status != "draft":
             skipped += 1
             skipped_reasons.append({"product_id": p.id, "sku": p.sku, "reason": "Onaya uygun taslak öneri yok"})
+            continue
+        # Pre-check: would approving this suggestion make the effective
+        # candidate publishable? If not, DO NOT mutate the suggestion.
+        ok, blocking = merchant_service.would_publish_if_approved(p, sug)
+        if not ok:
+            skipped += 1
+            skipped_reasons.append({
+                "product_id": p.id, "sku": p.sku,
+                "reason": "Yayına hazır değil: " + ", ".join(blocking),
+            })
             continue
         try:
             merchant_service.approve_suggestion(db, p)

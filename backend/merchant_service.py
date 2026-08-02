@@ -46,28 +46,81 @@ def _unresolved_issues(db: Session, product_id: str) -> list[ProductIssue]:
     ).all()
 
 
+def effective_candidate(
+    product: Product,
+    suggestion: Optional[ProductSuggestion],
+) -> dict:
+    """Return the effective publish candidate.
+
+    Approved-suggestion fields override original ONLY for:
+        name, description, category, seo_title, meta_description, tags.
+    Original always supplies: sku, price, stock, image_url, product_url.
+    """
+    use = suggestion is not None
+    return {
+        "sku": product.sku,
+        "name": (suggestion.suggested_name if use and suggestion.suggested_name else product.name),
+        "description": (suggestion.suggested_description if use and suggestion.suggested_description else product.description),
+        "category": (suggestion.suggested_category if use and suggestion.suggested_category else product.category),
+        "price": product.price,
+        "stock": product.stock,
+        "image_url": product.image_url,
+        "product_url": product.product_url,
+        "seo_title": suggestion.suggested_seo_title if use else None,
+        "meta_description": suggestion.suggested_meta_description if use else None,
+    }
+
+
 def passes_publish_validation(
     product: Product,
     suggestion: Optional[ProductSuggestion],
-    issues: Iterable[ProductIssue],
+    issues: Iterable[ProductIssue] = (),
 ) -> tuple[bool, list[str]]:
+    """Validate the effective publish candidate (Phase 2.1).
+
+    Original-only fields (sku, price, stock) remain blocking. An approved
+    suggestion may resolve missing name / description / category coming
+    from the original import.
+    """
     reasons: list[str] = []
     if suggestion is None or suggestion.suggestion_status != "approved":
         reasons.append("Onaylı bir öneri bulunmuyor")
-    else:
-        if not (suggestion.suggested_name or "").strip():
-            reasons.append("Öneri başlığı boş")
-        if not (suggestion.suggested_description or "").strip():
-            reasons.append("Öneri açıklaması boş")
-    if not (product.sku or "").strip():
+        # Still validate original blockers so caller sees the full picture.
+    candidate = effective_candidate(product, suggestion)
+    if not (candidate["sku"] or "").strip():
         reasons.append("SKU eksik")
-    if product.price is None or product.price <= 0:
+    if not (candidate["name"] or "").strip():
+        reasons.append("Ürün adı eksik")
+    if not (candidate["description"] or "").strip():
+        reasons.append("Açıklama eksik")
+    if candidate["price"] is None:
+        reasons.append("Fiyat eksik")
+    elif candidate["price"] <= 0:
         reasons.append("Fiyat geçersiz")
-    if product.stock is None or product.stock < 0:
+    if candidate["stock"] is None or candidate["stock"] < 0:
         reasons.append("Stok geçersiz")
-    critical = [i for i in issues if i.severity == "critical"]
-    if critical:
-        reasons.append(f"{len(critical)} kritik kalite sorunu var")
+    return (len(reasons) == 0, reasons)
+
+
+def would_publish_if_approved(
+    product: Product,
+    draft_suggestion: Optional[ProductSuggestion],
+) -> tuple[bool, list[str]]:
+    """Pre-check: assume this draft were approved, would it pass validation?"""
+    reasons: list[str] = []
+    candidate = effective_candidate(product, draft_suggestion)
+    if not (candidate["sku"] or "").strip():
+        reasons.append("SKU eksik")
+    if not (candidate["name"] or "").strip():
+        reasons.append("Ürün adı eksik")
+    if not (candidate["description"] or "").strip():
+        reasons.append("Açıklama eksik")
+    if candidate["price"] is None:
+        reasons.append("Fiyat eksik")
+    elif candidate["price"] <= 0:
+        reasons.append("Fiyat geçersiz")
+    if candidate["stock"] is None or candidate["stock"] < 0:
+        reasons.append("Stok geçersiz")
     return (len(reasons) == 0, reasons)
 
 

@@ -1,0 +1,34 @@
+{
+  "summary": "Phase 2.1 backend testing. Ran full pytest suite (89 tests) 5+ times against the live backend. BUG 1, BUG 2, BUG 4 fixes all work correctly and their tests pass consistently. BUG 3 (bulk AI transaction safety) is functionally correct on the transaction/isolation side, but the test `test_bulk_suggest_partial_success_persists` is FLAKY (~40% failure rate) because `bulk_suggest` in merchant_routes.py does NOT preserve the order of `payload.ids` when iterating products — it processes them in whatever order SQLAlchemy returns from `WHERE id IN (...)`, which for UUID PKs is effectively random. This is both a real API contract issue and the reason the '89/89 green' regression claim does not hold.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/bulk/suggest",
+        "issue": "Products are iterated in DB order (arbitrary for UUID PKs), not in the client-supplied `payload.ids` order. In BUG 3's scenario (first call to ai_service succeeds, second raises AIProviderError), the SUCCEEDING call ends up being applied to whichever product SQLAlchemy returns first — which may or may not match ids[0]. Consequence: `test_bulk_suggest_partial_success_persists` fails ~2/5 runs (`p1_after['active_suggestion_id'] is None`). Regression claim '89/89 tests pass' is not stable. Fix: after `db.query(Product).filter(Product.id.in_(payload.ids)).all()`, reorder to match `payload.ids`, e.g. `by_id = {p.id: p for p in rows}; products = [by_id[i] for i in payload.ids if i in by_id]`. Same reordering is advisable in `/api/bulk/approve` and `/api/bulk/reject` for consistency (though those tests currently pass because they don't depend on call ordering).",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_phase2_1.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "In /app/backend/merchant_routes.py bulk_suggest (and ideally bulk_approve / bulk_reject), reorder the fetched products to match payload.ids order before iterating. This makes bulk operations deterministic and fixes the flaky test_bulk_suggest_partial_success_persists (currently 2-3 failures in 5 runs of the full suite).",
+    "After the fix, rerun `pytest tests/` 3-5 times to confirm the 89/89 regression claim is now stable."
+  ],
+  "critical_code_review_comments": [
+    "bulk_suggest / bulk_approve / bulk_reject all rely on the iteration order of a SQLAlchemy `id.in_(...)` query. This is not order-preserving and should be normalized to `payload.ids` order at the top of each handler.",
+    "In merchant_service.create_suggestion, when a prior draft is auto-rejected (lines 183-186), no revision or activity log entry is emitted — small UX/audit gap.",
+    "BUG 1, 2, 4 fixes look clean: effective_candidate/would_publish_if_approved separation is correct; PATCH re-analysis via analyze_and_transition works and logs exactly one activity as required; bulk_approve pre-check correctly leaves the draft untouched with the Turkish 'Yayına hazır değil: ...' reason."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "98.8% (88/89 stable; 1 flaky at ~60% pass)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "None — tests use per-test temp SQLite DBs via conftest tmp_db fixture.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The only failing test is tests/test_phase2_1.py::test_bulk_suggest_partial_success_persists and it is FLAKY, not deterministically failing. Root cause is order preservation in merchant_routes.bulk_suggest. To reproduce reliably: run `cd /app/backend && for i in 1 2 3 4 5; do python -m pytest tests/ -q 2>&1 | tail -1; done` — expect 2-3 failures out of 5. Running the test alone (`pytest tests/test_phase2_1.py::test_bulk_suggest_partial_success_persists`) passes because UUIDs generated at that point happen to sort favorably. Alembic upgrade head is a clean no-op. Backend public URL reachable (GET /api/products → 200).",
+  "rca of the issue": "Product IDs in this codebase are UUID strings, not incrementing integers. In /app/backend/merchant_routes.py:249, `db.query(Product).filter(Product.id.in_(payload.ids)).all()` returns rows in SQLite ROWID order (essentially insertion order in the temp DB), which is INDEPENDENT of the order of ids in the IN clause. Test test_bulk_suggest_partial_success_persists seeds two products B3-1 then B3-2, and monkeypatches ai_service.generate_suggestion so that call #1 succeeds and call #2 raises AIProviderError. The test then asserts that p1 (B3-1, listed first in payload) got the successful suggestion. But because bulk_suggest iterates in DB order, it sometimes processes B3-2 first — meaning B3-2 gets the suggestion and B3-1 gets the failure — and the assertion `p1_after['active_suggestion_id'] is not None` fails. Verified via a debug script: `db.query(Product).filter(Product.id.in_([p1_id, p2_id])).all()` and `...in_([p2_id, p1_id])` both returned ['B3-2', 'B3-1'] in the same run, proving the IN-clause order is ignored. Mitigation: at the top of bulk_suggest (and for consistency, bulk_approve and bulk_reject), map fetched rows by id and iterate payload.ids explicitly: `by_id = {p.id: p for p in rows}; products = [by_id[i] for i in payload.ids if i in by_id]`."
+}
