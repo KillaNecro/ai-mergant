@@ -1,134 +1,70 @@
 # AI Merchant OS Lite - PRD
 
-## Original Problem Statement
-Türkçe B2B e-ticaret için AI destekli ürün kataloğu yönetim aracı. Phase 1 hardening tamamlandı.
+## Product objective
+Türkçe B2B e-ticaret için AI destekli ürün hazırlama iş akışı:
+İçe aktarılan ürün → Kalite analizi → Sorunlar → AI önerisi → İnsan onayı → Yayına hazır.
 
-**User choices:** SQLite · Demo Modu ile başla + Gemini API anahtarı elle sağlanacak · Karışık Türkçe ürün kategorileri.
+Orijinal içeri aktarılan veri, AI önerisinden ve onaylanan içerikten her zaman ayrı tutulur.
 
-## Architecture
-- **Backend:** FastAPI + SQLAlchemy 2 + SQLite + Alembic. AI: google-genai SDK, `AIProviderError` ile hata yüzeyleme. defusedxml ile güvenli XML.
-- **Frontend:** React + Tailwind + shadcn/ui + lucide-react + sonner. Turkish UI, desktop-first.
-- **Testler:** pytest (30 lokal + 22 canlı entegrasyon + AI hata testleri = 52). Geçici SQLite DB fixture.
+## Architecture (Phase 2)
+- **Backend:** FastAPI + SQLite + SQLAlchemy + Alembic. Modules: `server.py`, `merchant_routes.py`, `merchant_service.py`, `quality_service.py`, `revision_service.py`, `ai_service.py`.
+- **Frontend:** React + Tailwind, sidebar layout preserved.
+- **AI:** google-genai (Gemini) + deterministic Demo Mode. Provider failures raise `AIProviderError` → HTTP 502.
+- **Testing:** 81 pytest tests, all green. Frontend production build clean.
 
-## Personas
-- E-ticaret operasyon uzmanı
-- KOBİ mağaza sahibi
+## Data model (Phase 2 additions)
+- `Product`: `workflow_status`, `quality_score`, `quality_analyzed_at`, `active_suggestion_id`
+- `ProductIssue`: id, product_id, issue_code, field_name, severity, message, recommendation, is_resolved, timestamps
+- `ProductSuggestion`: id, product_id, suggested_* fields, provider, model, suggestion_status, timestamps
+- `ProductRevision`: id, product_id, action_type, source, before_snapshot, after_snapshot, created_at
 
-## Core Requirements (static)
-- Türkçe UI (6 bölüm)
-- CSV + XML (nested, RSS, Google Merchant) importer, kolon eşleştirme + güven skoru + satır hataları
-- Yıkıcı olmayan import (fill_empty vs replace)
-- SKU unique + normalize
-- UTF-8 BOM CSV export, Türkçe karakter koruması
-- Timezones: UTC ISO 8601 (Z suffix)
-- Demo mode + Gemini (hata yüzeyleme)
-- Alembic migrasyonları
+## Workflow states (Turkish labels)
+- `imported` → İçe Aktarıldı
+- `needs_attention` → Dikkat Gerekiyor (critical issues or score<60)
+- `ready_for_ai` → AI İçin Hazır (score≥60, no suggestion)
+- `awaiting_review` → İnceleme Bekliyor (draft suggestion)
+- `approved` → Onaylandı (approved but validation blocking)
+- `ready_to_publish` → Yayına Hazır (approved + validation ok)
 
-## Implemented (2026-02-01 → Phase 1)
-**Data safety & migrations:**
-- `Product.sku` UNIQUE + normalized (whitespace strip, dedup)
-- Alembic setup + `0001_initial.py` (idempotent, upgrades legacy DBs without data loss)
-- `.gitignore` extended for `*.db`, `.env`
+## Implemented (2026-02 · Phase 2)
+**Backend**
+- Alembic `0002_merchant_core` (idempotent, preserves Phase 1 data)
+- Deterministic `quality_service.py` — 17 issue codes with stable weights; single source of truth for scoring
+- `merchant_service.py` — workflow transitions, create/edit/approve/reject suggestions, revert
+- `revision_service.py` — JSON snapshots
+- `ai_service.generate_suggestion` — demo (deterministic-v1) + Gemini JSON output, never invents specs
+- `merchant_routes.py` — 13 new endpoints (analyze, issues, suggest, patch, approve, reject, revisions, revert, bulk×4, ready-to-publish export)
+- Auto-analyze on import
+- Dashboard stats extended (average_quality_score, workflow buckets, open_critical_issues)
+- Product list filters: workflow_status, score_bucket (low/mid/high/critical)
 
-**Import hardening:**
-- File validation: allowed extensions (.csv, .xml), MIME check, `IMPORT_MAX_FILE_MB=10`, `IMPORT_MAX_ROWS=10000`, cell length cap
-- Encodings: UTF-8 BOM, UTF-8, Windows-1254, ISO-8859-9
-- Number parsing: 1.234,56 / 1234,56 / 1,234.56 / 1234.56 all → correct float
-- Turkish column auto-mapping with `_tr_norm()` (İ→i, ş→s, ğ→g, ü→u, ö→o, ç→c) + `mapping_confidence`
-- `mode` param: `fill_empty` (safe, default) or `replace`
-- Unmapped fields never touched; row-level errors with row numbers returned
-- Response: `{inserted, updated, skipped, failed, errors:[]}`
-- SKU normalization + intra-batch flush so duplicates within same file update, not fail
-- Negative price / stock rejected per row
+**Frontend**
+- Dashboard: 8 new KPIs (Ortalama Kalite, Dikkat Gerekiyor, İnceleme Bekliyor, Onaylandı, Yayına Hazır, Kritik Sorun, etc.)
+- Products table: quality/issue-count/status columns; workflow + score filters
+- ProductEditor: 4 tabs (Orijinal Veri, AI Önerisi, Kalite Analizi, Revizyon Geçmişi) with side-by-side comparison for name/desc/category/SEO/meta/tags; buttons Kaliteyi Analiz Et, AI Önerisi Oluştur, Öneriyi Kaydet, Onayla, Reddet, Önceki Sürüme Dön
+- Export: "Yayına Hazır Ürünleri Dışa Aktar" card
+- BulkOps: 4 new merchant actions (analyze/suggest/approve/reject) with confirmation dialogs
 
-**Safe XML:**
-- `defusedxml` parser
-- `_find_product_nodes()` detects: `<products><product>`, `<items><item>`, `<rss><channel><item>`, Google Merchant style, XML namespaces
-- Turkish error message when structure cannot be inferred
-
-**Validation & timezones:**
-- Pydantic bounds: `page>=1`, `page_size 1..200`, `ids min_length 1`, `percent` within `BULK_PRICE_PERCENT_LIMIT=90`
-- URL fields validated http/https or null
-- All timestamps served as UTC ISO with trailing `Z`
-
-**AI transparency:**
-- google-genai SDK (was emergentintegrations)
-- `GEMINI_MODEL` env var (default gemini-2.0-flash)
-- `AIProviderError` → HTTP 502 with Turkish message; never silent Demo fallback when key is set
-- Demo mode preserves product codes/dimensions/brands; no invented "günlük kullanıma uygun" claims
-
-**Testing (52 tests passing):**
-- `tests/test_import.py` — 11 tests: partial update preservation, mode replace, row errors, SKU normalization/uniqueness, number formats, TR auto-mapping, encoding, rejection cases
-- `tests/test_products.py` — 7 tests: pagination bounds, empty bulk, percent limit, negative price safety, persistence, UTC timestamps
-- `tests/test_export.py` — 3 tests: UTF-8 BOM, Turkish chars, selected export, empty rejection
-- `tests/test_ai.py` — 4 tests: demo mode active, code preservation, no fabricated claims, Gemini failure surfaces
-- `tests/test_xml.py` — 5 tests: products/product, items/item, RSS, Google Merchant, unknown flat rejected
-- Live integration + AI-failure tests added by testing agent
-
-**Frontend reliability (no redesign):**
-- Import: mode radios, confidence badges (Yüksek/Belirsiz), row error panel, disabled buttons during requests
-- Products: loading/empty/error states with retry, "Tümü Seç yalnızca bu sayfayı seçer" hint
-- BulkOps: confirm dialog for 20+ product batches, buttons disabled while inflight
-- ProductEditor: confirm on "Orijinale Geri Dön", loading/error states, disabled while saving
-- Dashboard/Export: error retry, busy states, no infinite spinners
-
-**Portability:**
-- `backend/.env.example` (GEMINI_KEY, MODEL, SQLITE_PATH, CORS, IMPORT limits, price limit)
-- `frontend/.env.example` (REACT_APP_BACKEND_URL with localhost fallback baked into api.js)
-- Trimmed `requirements.txt` — removed Mongo/Stripe/AWS/OAuth/OpenAI/bcrypt/jwt
-- README updated with exact tested commands + `alembic upgrade head`
-
-## Files Changed (Phase 1)
-Backend:
-- `server.py` (major rewrite: import mode, validation, timezones, defusedxml)
-- `ai_service.py` (google-genai SDK, AIProviderError)
-- `models.py` (UniqueConstraint on sku)
-- `sample_data.py` (Z-suffix timestamp)
-- `alembic.ini` (new)
-- `alembic/env.py` (new)
-- `alembic/script.py.mako` (new)
-- `alembic/versions/0001_initial.py` (new)
-- `pytest.ini`
-- `requirements.txt` (trimmed)
-- `.env.example` (updated)
-- `tests/__init__.py`, `tests/conftest.py`, `tests/test_import.py`, `tests/test_products.py`, `tests/test_export.py`, `tests/test_ai.py`, `tests/test_xml.py` (new)
-
-Frontend:
-- `.env.example` (new)
-- `src/lib/api.js` (localhost fallback)
-- `src/pages/Import.jsx` (mode selector, error panel, confidence badges)
-- `src/pages/Products.jsx` (loading/error/empty, page-only select-all)
-- `src/pages/BulkOps.jsx` (confirm large batches, busy states)
-- `src/components/ProductEditor.jsx` (confirm revert, loading/error, disabled states)
-- `src/pages/Dashboard.jsx` (error retry)
-- `src/pages/Export.jsx` (busy states)
-
-Root:
-- `README.md` (rewritten with tested run commands)
-- `.gitignore` (append *.db, .env)
-
-## Test Command & Output
+## Testing
 ```
-cd /app/backend && python -m pytest -v
-============================= test session starts ==============================
-collected 30 items
-tests/test_ai.py ....         [ 13%]
-tests/test_export.py ...      [ 23%]
-tests/test_import.py ......... [ 60%]
-tests/test_products.py .......  [ 83%]
-tests/test_xml.py .....       [100%]
-======================= 30 passed in 2.09s ========================
+cd backend && python -m pytest -q
+81 passed
 ```
-Plus 22 live-integration + AI-failure tests from testing agent → 52/52 total.
+Coverage: import safety (Phase 1 preserved), quality engine, workflow transitions, AI failure surfacing, revisions/revert, bulk approve eligibility, ready-to-publish export.
 
-## Known Remaining Issues
-- server.py is 800+ lines — refactoring into routers deferred for later phase (not blocking).
-- Existing preview DB may retain one legacy `last_import_at` Meta value without Z suffix; overwritten on next import.
-- GitHub push is handled via Emergent platform's Push-to-GitHub action; not performed inside the sandbox.
+## Known remaining issues (Phase 3 candidates)
+- server.py + merchant_routes.py combined is ~1000 lines — router package split deferred
+- Bulk API request schemas need OpenAPI descriptions
+- Duplicate-title detection is O(N²); acceptable at N<10k but should switch to indexed subquery later
+- Migration doesn't run analysis for legacy products; they remain `imported` until user clicks "Analyze All"
 
-## Backlog (Phase 2 candidates)
-- P1: Ayarlar ekranından Gemini key girme (backend .env write)
-- P1: XLSX import support
-- P1: Image URL reachability check
-- P2: Per-product revision history
-- P2: Splitting server.py into routers
+## Restrictions (respected)
+No auth, no payments, no Stripe/Woo/İkas/Shopier/Instagram/Meta, no image gen, no XLSX, no Redis/Celery, no multi-tenant, no visual rebrand.
+
+## Backlog (Phase 3+)
+- P1: Gemini key entry from Ayarlar UI
+- P1: Router split (`routers/` package)
+- P1: XLSX import
+- P2: Automated analyze-on-schedule for legacy data
+- P2: Multi-language suggestion output
+- P2: Product-image validation ping check
