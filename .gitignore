@@ -94,3 +94,9 @@ credentials.json
 backend/merchant_os.db
 backend/.env
 frontend/.env
+
+# Never commit the SQLite db
+backend/merchant_os.db
+*.db
+*.sqlite
+*.sqlite3

@@ -61,8 +61,10 @@ const BulkOps = () => {
   };
 
   const ids = () => [...selected];
-  const improveTitles = () => run("Başlık İyileştir", () => api.post("/bulk/improve-products", { ids: ids(), kind: "title" }), "Başlıklar iyileştirildi");
-  const improveDescs = () => run("Açıklama İyileştir", () => api.post("/bulk/improve-products", { ids: ids(), kind: "description" }), "Açıklamalar iyileştirildi");
+  const improveTitles = () => run("Başlık İyileştir", () => api.post("/bulk/improve-products", { ids: ids(), kind: "title" }), "Başlıklar iyileştirildi");  // legacy, no UI card
+  const improveDescs = () => run("Açıklama İyileştir", () => api.post("/bulk/improve-products", { ids: ids(), kind: "description" }), "Açıklamalar iyileştirildi");  // legacy, no UI card
+  // Silence lint for unused legacy helpers kept for backward compat.
+  void improveTitles; void improveDescs;
   const setCat = () => {
     if (!newCategory.trim()) return toast.error("Kategori girin");
     run(`Kategori: ${newCategory.trim()}`, () => api.post("/bulk/category", { ids: ids(), category: newCategory.trim() }), "Kategori güncellendi");
@@ -110,8 +112,6 @@ const BulkOps = () => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <ActionCard title="AI ile Başlık İyileştir" icon={Sparkles} onClick={improveTitles} testid="bulk-improve-titles" disabled={busy} />
-        <ActionCard title="AI ile Açıklama İyileştir" icon={Sparkles} onClick={improveDescs} testid="bulk-improve-descs" disabled={busy} />
         <ActionCard title="Seçilenleri Dışa Aktar" icon={Download} onClick={exportSel} testid="bulk-export" disabled={busy} />
         <ActionCard title="Kaliteyi Analiz Et" icon={Sparkles} onClick={() => runMerchant("analyze", "Kalite Analizi", "/bulk/analyze", "Analiz tamamlandı")} testid="bulk-analyze" disabled={busy} />
         <ActionCard title="AI Önerisi Oluştur" icon={Sparkles} onClick={() => runMerchant("suggest", "AI Önerisi Oluştur", "/bulk/suggest", "AI önerileri oluşturuldu")} testid="bulk-suggest" disabled={busy} />

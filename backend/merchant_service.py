@@ -93,6 +93,8 @@ def passes_publish_validation(
         reasons.append("Ürün adı eksik")
     if not (candidate["description"] or "").strip():
         reasons.append("Açıklama eksik")
+    if not (candidate["category"] or "").strip():
+        reasons.append("Kategori eksik")
     if candidate["price"] is None:
         reasons.append("Fiyat eksik")
     elif candidate["price"] <= 0:
@@ -115,6 +117,8 @@ def would_publish_if_approved(
         reasons.append("Ürün adı eksik")
     if not (candidate["description"] or "").strip():
         reasons.append("Açıklama eksik")
+    if not (candidate["category"] or "").strip():
+        reasons.append("Kategori eksik")
     if candidate["price"] is None:
         reasons.append("Fiyat eksik")
     elif candidate["price"] <= 0:

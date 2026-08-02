@@ -860,20 +860,26 @@ async def bulk_improve_products(payload: BulkImproveIn, db: Session = Depends(ge
 
 @api.post("/bulk/category")
 def bulk_category(payload: BulkCategoryIn, db: Session = Depends(get_db)):
-    n = (
-        db.query(Product)
-        .filter(Product.id.in_(payload.ids))
-        .update({"category": payload.category, "is_edited": True}, synchronize_session=False)
-    )
-    _log_activity(db, "bulk", f"Kategori atandı ({payload.category}): {n} ürün")
+    products = db.query(Product).filter(Product.id.in_(payload.ids)).all()
+    changed_ids: list[str] = []
+    for p in products:
+        if p.category != payload.category:
+            p.category = payload.category
+            p.is_edited = True
+            changed_ids.append(p.id)
+    # Re-analyze only products whose value actually changed.
+    for p in products:
+        if p.id in changed_ids:
+            merchant_service.analyze_and_transition(db, p)
+    _log_activity(db, "bulk", f"Kategori atandı ({payload.category}): {len(changed_ids)} ürün")
     db.commit()
-    return {"updated": n}
+    return {"updated": len(changed_ids)}
 
 
 @api.post("/bulk/price-percent")
 def bulk_price_percent(payload: BulkPricePctIn, db: Session = Depends(get_db)):
     products = db.query(Product).filter(Product.id.in_(payload.ids)).all()
-    n = 0
+    changed_ids: list[str] = []
     factor = 1 + (payload.percent / 100.0)
     for p in products:
         if p.price is None:
@@ -881,12 +887,18 @@ def bulk_price_percent(payload: BulkPricePctIn, db: Session = Depends(get_db)):
         new_price = round(p.price * factor, 2)
         if new_price < 0:
             continue  # never persist a negative price
+        if new_price == p.price:
+            continue  # nothing actually changed
         p.price = new_price
         p.is_edited = True
-        n += 1
-    _log_activity(db, "bulk", f"Fiyat %{payload.percent} güncellendi: {n} ürün")
+        changed_ids.append(p.id)
+    # Re-analyze only products whose value actually changed.
+    for p in products:
+        if p.id in changed_ids:
+            merchant_service.analyze_and_transition(db, p)
+    _log_activity(db, "bulk", f"Fiyat %{payload.percent} güncellendi: {len(changed_ids)} ürün")
     db.commit()
-    return {"updated": n}
+    return {"updated": len(changed_ids)}
 
 
 # --- Export --------------------------------------------------------------
@@ -950,17 +962,6 @@ def export_filtered(
 # --- App wiring ----------------------------------------------------------
 app.include_router(api)
 app.include_router(merchant_routes.router)
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(","),
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-# --- App wiring ----------------------------------------------------------
-app.include_router(api)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
