@@ -964,6 +964,7 @@ def export_filtered(
 app.include_router(api)
 app.include_router(merchant_routes.router)
 app.include_router(woocommerce_routes.router)
+app.include_router(woocommerce_routes.publish_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

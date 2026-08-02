@@ -15,6 +15,18 @@ Orijinal içeri aktarılan veri, AI önerisinden ve onaylanan içerikten her zam
 ## Workflow states
 - imported / needs_attention / ready_for_ai / awaiting_review / approved / ready_to_publish
 
+## Implemented — Phase 3A Part B1 (2026-02, WooCommerce single-product draft publishing)
+- `WooCommerceClient.create_product(payload)` and `update_product(external_id, payload)` — forces `status="draft"`, refuses non-positive remote IDs, sanitizes name/permalink. Mock mode returns a deterministic (`zlib.crc32(sku)`) positive external ID, reused between create and update for the same SKU. Live mode calls `POST /products` and `PUT /products/{id}` via the existing safety layer (auth, timeout, SSL, SSRF, redirect refusal, size cap).
+- `integrations/woocommerce_publish_service.py` — precondition checker (Turkish blocking reasons, "WooCommerce kategori eşleştirmesi eksik" reused), neutral payload builder (approved suggestion → name/description/category/SEO/tags; original → SKU/price/stock/image; `regular_price` decimal string; `manage_stock=true`; category via `CategoryMapping`; `meta_data` only under `ai_merchant_os_*` allowlist; **never uses `product_url` as permalink**), idempotent `ProductPublication` upsert keyed by `(product_id, channel="woocommerce")`, sanitized JSON snapshots capped at 8 KB, activity log emitting exactly one row per attempt.
+- New endpoints (`server.py` wires a second router):
+  - `POST /api/products/{product_id}/publish/woocommerce` — 200 on success, 400 on precondition failure, 401/403/429/502/504 mapped from client errors.
+  - `GET /api/products/{product_id}/publications/woocommerce` — 200 with safe status fields (no `payload_snapshot`/`response_snapshot`), 404 when absent.
+- Workflow status: added `sent_as_draft` ("Mağazaya Taslak Gönderildi") to `STATUS_LABELS`; `compute_workflow_status` preserves `sent_as_draft` while approved suggestion still passes validation, so unrelated reads never downgrade a sent product.
+- Transaction safety: pending `ProductPublication` row is committed *before* the remote call so concurrent attempts hit the unique constraint; failure preserves previous `external_product_id`, `external_url` and `last_success_at`; original product and approved suggestion never mutated on failure.
+- **16 new tests** (`tests/test_woocommerce_publish.py`) via `httpx.MockTransport` covering preconditions, payload correctness, first-send/re-send idempotency, failure preservation, activity accounting, and safe publication status endpoint. `conftest.py` reload list extended with `integrations.woocommerce_publish_service` (avoids stale exception-class identity across test reloads).
+- **Total pytest**: **216 passed** across two consecutive runs. Frontend `yarn build` passes with no regressions.
+- **Not in this phase**: bulk publishing, publish history UI, ProductEditor button, real WooCommerce credentials, new Alembic migration (existing schema was sufficient).
+
 ## Implemented — Phase 3A Part A (2026-02, WooCommerce backend foundation)
 - `.env.example` extended with `WOOCOMMERCE_URL`, `WOOCOMMERCE_CONSUMER_KEY`, `WOOCOMMERCE_CONSUMER_SECRET`, `WOOCOMMERCE_MODE=mock`, `WOOCOMMERCE_TIMEOUT_SECONDS=20`, `WOOCOMMERCE_VERIFY_SSL=true`, `APP_ENV`.
 - Two new SQLAlchemy models with unique constraints + indexes:
@@ -54,9 +66,9 @@ No real WooCommerce/Gemini calls, no product publishing endpoints, no frontend c
 ## Test result
 ```
 cd backend && python -m pytest -q
-200 passed
+216 passed
 ```
-Stable across two consecutive runs. Includes 104 new tests for the WooCommerce foundation.
+Stable across two consecutive runs. Includes 16 new tests for Phase 3A Part B1 single-product draft publishing.
 
 ## Files changed (Phase 2.1)
 - **Backend modified:** `merchant_service.py`, `merchant_routes.py`, `server.py`

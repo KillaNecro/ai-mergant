@@ -35,7 +35,8 @@ from integrations.woocommerce_client import (
     WooCommerceSecurityError,
     WooCommerceTimeoutError,
 )
-from models import Activity, CategoryMapping
+from integrations import woocommerce_publish_service as publish_service
+from models import Activity, CategoryMapping, Product, ProductPublication
 from woocommerce_schemas import (
     CategoryMappingCreate,
     CategoryMappingDeleteResponse,
@@ -408,3 +409,96 @@ def delete_category_mapping(mapping_id: str, db: Session = Depends(get_db)):
         id=mapping_id,
         message="Kategori eşleştirmesi silindi",
     )
+
+
+# --------------------------------------------------------------------------- #
+# Single-product draft publishing (Part B1)
+# --------------------------------------------------------------------------- #
+
+# Uses a distinct router so paths live under /api/products/... while sharing
+# the same dependency + error-mapping utilities as the /integrations router.
+publish_router = APIRouter(prefix="/api/products", tags=["woocommerce"])
+
+
+def _get_product_or_404(db: Session, pid: str) -> Product:
+    p = db.get(Product, pid)
+    if p is None:
+        raise HTTPException(status_code=404, detail="Ürün bulunamadı")
+    return p
+
+
+def _publication_to_status(pub: ProductPublication):
+    from woocommerce_schemas import PublicationStatusResponse  # local import: cycle-safe
+    created = pub.created_at
+    updated = pub.updated_at
+    lsa = pub.last_success_at
+    if created and created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    if updated and updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    if lsa and lsa.tzinfo is None:
+        lsa = lsa.replace(tzinfo=timezone.utc)
+    return PublicationStatusResponse(
+        product_id=pub.product_id,
+        channel=pub.channel,
+        external_product_id=pub.external_product_id,
+        external_url=pub.external_url,
+        publication_status=pub.publication_status,
+        attempt_count=pub.attempt_count or 0,
+        last_error=pub.last_error,
+        created_at=created,
+        updated_at=updated,
+        last_success_at=lsa,
+    )
+
+
+@publish_router.post("/{product_id}/publish/woocommerce")
+async def publish_to_woocommerce(
+    product_id: str,
+    db: Session = Depends(get_db),
+    client: WooCommerceClient = Depends(get_woocommerce_client),
+):
+    from woocommerce_schemas import PublishResponse
+
+    product = _get_product_or_404(db, product_id)
+    try:
+        result = await publish_service.publish_product_to_woocommerce(db, product, client)
+    except publish_service.PublishPreconditionError as exc:
+        raise HTTPException(status_code=400, detail="; ".join(exc.reasons)) from None
+    except WooCommerceClientError as exc:
+        raise map_woocommerce_error_to_http_exception(exc) from None
+
+    pub = result.publication
+    message = (
+        "Ürün WooCommerce'e taslak olarak gönderildi"
+        if result.action == "draft_created"
+        else "WooCommerce ürün taslağı güncellendi"
+    )
+    return PublishResponse(
+        success=True,
+        mode=client.config.mode,
+        action=result.action,
+        product_id=product.id,
+        external_product_id=pub.external_product_id,
+        external_url=pub.external_url,
+        publication_status=pub.publication_status,
+        workflow_status=product.workflow_status,
+        attempt_count=pub.attempt_count or 0,
+        message=message,
+    )
+
+
+@publish_router.get("/{product_id}/publications/woocommerce")
+def get_publication_status(product_id: str, db: Session = Depends(get_db)):
+    _get_product_or_404(db, product_id)
+    pub = (
+        db.query(ProductPublication)
+        .filter(
+            ProductPublication.product_id == product_id,
+            ProductPublication.channel == CHANNEL,
+        )
+        .one_or_none()
+    )
+    if pub is None:
+        raise HTTPException(status_code=404, detail="Yayın kaydı bulunamadı")
+    return _publication_to_status(pub)

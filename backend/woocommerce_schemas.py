@@ -96,3 +96,33 @@ class CategoryMappingDeleteResponse(BaseModel):
     deleted: bool
     id: str
     message: str
+
+
+# --------------------------------------------------------------------------- #
+# Publishing
+# --------------------------------------------------------------------------- #
+
+class PublishResponse(BaseModel):
+    success: bool
+    mode: str
+    action: str  # draft_created | draft_updated
+    product_id: str
+    external_product_id: Optional[str] = None
+    external_url: Optional[str] = None
+    publication_status: str
+    workflow_status: str
+    attempt_count: int
+    message: str
+
+
+class PublicationStatusResponse(BaseModel):
+    product_id: str
+    channel: str
+    external_product_id: Optional[str] = None
+    external_url: Optional[str] = None
+    publication_status: str
+    attempt_count: int
+    last_error: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    last_success_at: Optional[datetime] = None

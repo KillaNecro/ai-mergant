@@ -472,6 +472,87 @@ class WooCommerceClient:
         collected.sort(key=lambda c: c["id"])
         return collected
 
+    async def create_product(self, payload: dict) -> dict:
+        """Create a WooCommerce product draft. Always forces status='draft'."""
+        return await self._send_product("create", payload, external_product_id=None)
+
+    async def update_product(self, external_product_id: int, payload: dict) -> dict:
+        """Update an existing WooCommerce product draft."""
+        if not isinstance(external_product_id, int) or isinstance(external_product_id, bool) \
+                or external_product_id <= 0:
+            raise WooCommerceResponseError(
+                "Geçersiz WooCommerce ürün kimliği", code="invalid_response"
+            )
+        return await self._send_product("update", payload, external_product_id=external_product_id)
+
+    # ------------------------------------------------------------------ #
+    def _mock_product_id(self, payload: dict) -> int:
+        """Deterministic positive integer derived from the payload SKU.
+
+        Same SKU → same mock id, both for create and update.
+        """
+        import zlib
+        seed = str(payload.get("sku") or payload.get("name") or "wc-mock").encode("utf-8")
+        return (zlib.crc32(seed) & 0x7FFFFFFF) % 9_000_000 + 1_000_000
+
+    def _normalize_product_response(self, raw: Any) -> dict:
+        if not isinstance(raw, dict):
+            raise WooCommerceResponseError(
+                "WooCommerce ürün cevabı geçersiz", code="invalid_response"
+            )
+        rid = raw.get("id")
+        if not isinstance(rid, int) or isinstance(rid, bool) or rid <= 0:
+            raise WooCommerceResponseError(
+                "WooCommerce ürün cevabı geçerli bir ID içermiyor",
+                code="invalid_response",
+            )
+        name = raw.get("name") or ""
+        permalink = raw.get("permalink") or ""
+        if not isinstance(name, str):
+            name = ""
+        if not isinstance(permalink, str):
+            permalink = ""
+        return {
+            "id": rid,
+            "status": "draft",
+            "permalink": permalink[:500],
+            "name": name[:500],
+        }
+
+    async def _send_product(
+        self,
+        action: str,
+        payload: dict,
+        *,
+        external_product_id: Optional[int],
+    ) -> dict:
+        # Always force draft. We never accept "publish" here.
+        safe_payload = dict(payload)
+        safe_payload["status"] = "draft"
+
+        if self.config.is_mock:
+            mock_id = external_product_id or self._mock_product_id(safe_payload)
+            store = self.config.store_url or "https://mock.woocommerce.local"
+            return {
+                "id": mock_id,
+                "status": "draft",
+                "permalink": f"{store}/?p={mock_id}",
+                "name": (safe_payload.get("name") or "")[:500],
+            }
+
+        self.config.require_live_ready()
+        self._check_host_allowed()
+
+        if action == "create":
+            method = "POST"
+            path = "/products"
+        else:
+            method = "PUT"
+            path = f"/products/{int(external_product_id)}"
+
+        data = await self._request_json(method, path, json_body=safe_payload)
+        return self._normalize_product_response(data)
+
     # ------------------------------------------------------------------ #
     # Internal helpers
     # ------------------------------------------------------------------ #
@@ -538,6 +619,7 @@ class WooCommerceClient:
         path: str,
         *,
         params: Optional[dict] = None,
+        json_body: Optional[dict] = None,
         want_headers: bool = False,
     ):
         try:
@@ -551,7 +633,7 @@ class WooCommerceClient:
         try:
             async with client:
                 try:
-                    response = await client.request(method, path, params=params)
+                    response = await client.request(method, path, params=params, json=json_body)
                 except httpx.TimeoutException as exc:
                     raise WooCommerceTimeoutError(
                         "WooCommerce isteği zaman aşımına uğradı", code="timeout"

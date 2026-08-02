@@ -27,6 +27,7 @@ STATUS_LABELS = {
     "awaiting_review": "İnceleme Bekliyor",
     "approved": "Onaylandı",
     "ready_to_publish": "Yayına Hazır",
+    "sent_as_draft": "Mağazaya Taslak Gönderildi",
 }
 
 
@@ -134,6 +135,14 @@ def compute_workflow_status(
     active_suggestion: Optional[ProductSuggestion],
 ) -> str:
     issues = list(issues)
+    # A product that has already been sent to WooCommerce as a draft must not
+    # be silently downgraded by unrelated reads. Preserve sent_as_draft when
+    # the approved suggestion still passes publish validation.
+    if product.workflow_status == "sent_as_draft" and active_suggestion \
+            and active_suggestion.suggestion_status == "approved":
+        ok, _ = passes_publish_validation(product, active_suggestion, issues)
+        if ok:
+            return "sent_as_draft"
     if active_suggestion and active_suggestion.suggestion_status == "approved":
         ok, _ = passes_publish_validation(product, active_suggestion, issues)
         return "ready_to_publish" if ok else "approved"
